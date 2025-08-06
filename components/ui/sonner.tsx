@@ -1,33 +1,28 @@
-"use client"
+import { Toast, ToastClose, ToastDescription, ToastProvider, ToastTitle, ToastViewport } from "@/components/ui/toast"
+import { useToast } from "@/hooks/use-toast"
+import * as React from "react"
 
-import { Toaster as SonnerToaster } from "sonner"
-import { useTheme } from "next-themes"
-
-type ToasterProps = React.ComponentProps<typeof SonnerToaster>
-
-const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
+const Sonner = () => {
+  const { toasts } = useToast()
 
   return (
-    <SonnerToaster
-      theme={theme as ToasterProps["theme"]}
-      className="toaster group"
-      toastOptions={{
-        classNames: {
-          toast:
-            "group toast group-[.toaster]:bg-background group-[.toaster]:text-foreground group-[.toaster]:border-border group-[.toaster]:shadow-lg",
-          description: "group-[.toast]:text-muted-foreground",
-          actionButton:
-            "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground",
-          cancelButton:
-            "group-[.toast]:bg-muted group-[.toast]:text-muted-foreground",
-        },
-      }}
-      {...props}
-    />
+    <ToastProvider>
+      {toasts.map(function ({ ...props }) {
+        return (
+          <Toast key={props.id} {...props}>
+            <div className="grid gap-1">
+              {props.title && <ToastTitle>{props.title}</ToastTitle>}
+              {props.description && (
+                <ToastDescription>{props.description}</ToastDescription>
+              )}
+            </div>
+            <ToastClose className="shrink-0" />
+          </Toast>
+        )
+      })}
+      <ToastViewport />
+    </ToastProvider>
   )
 }
 
-// Export both named and default exports for compatibility
-export { Toaster }
-export default Toaster
+export default Sonner
