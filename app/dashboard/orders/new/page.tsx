@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase"
 import { useAuth } from "@/lib/auth"
@@ -28,7 +28,7 @@ interface Table {
   capacity: number
   status: string
   floor_id: string
-  floor?: Floor
+  floors?: Floor  // Fixed: Changed from 'floor' to 'floors' to match database relationship
 }
 
 interface Category {
@@ -148,85 +148,82 @@ export default function NewOrderPage() {
 
   const calculateTotals = () => {
     const subtotal = orderForm.items.reduce((sum, item) => sum + item.total_price, 0)
-    const tax_amount = subtotal * 0.05 // 5% tax (2.5% SGST + 2.5% CGST)
+    const tax_amount = subtotal * 0.18 // 18% tax
     const total_amount = subtotal + tax_amount
 
-    setOrderForm((prev) => ({
+    setOrderForm(prev => ({
       ...prev,
       subtotal,
       tax_amount,
-      total_amount,
+      total_amount
     }))
   }
 
   const addItemToOrder = (menuItem: MenuItem) => {
-    const existingItemIndex = orderForm.items.findIndex((item) => item.menu_item_id === menuItem.id)
-
-    if (existingItemIndex >= 0) {
-      // Update existing item quantity
-      const updatedItems = [...orderForm.items]
-      updatedItems[existingItemIndex].quantity += 1
-      updatedItems[existingItemIndex].total_price = updatedItems[existingItemIndex].quantity * menuItem.price
-
-      setOrderForm((prev) => ({
+    const existingItem = orderForm.items.find(item => item.menu_item_id === menuItem.id)
+    
+    if (existingItem) {
+      setOrderForm(prev => ({
         ...prev,
-        items: updatedItems,
+        items: prev.items.map(item =>
+          item.menu_item_id === menuItem.id
+            ? { ...item, quantity: item.quantity + 1, total_price: (item.quantity + 1) * menuItem.price }
+            : item
+        )
       }))
     } else {
-      // Add new item
       const newItem: OrderItem = {
         menu_item_id: menuItem.id,
         menu_item: menuItem,
         quantity: 1,
         modifiers: "",
-        total_price: menuItem.price,
+        total_price: menuItem.price
       }
-
-      setOrderForm((prev) => ({
+      setOrderForm(prev => ({
         ...prev,
-        items: [...prev.items, newItem],
+        items: [...prev.items, newItem]
       }))
     }
   }
 
-  const updateItemQuantity = (itemIndex: number, newQuantity: number) => {
+  const updateItemQuantity = (menuItemId: string, newQuantity: number) => {
     if (newQuantity <= 0) {
-      removeItemFromOrder(itemIndex)
+      removeItem(menuItemId)
       return
     }
 
-    const updatedItems = [...orderForm.items]
-    updatedItems[itemIndex].quantity = newQuantity
-    updatedItems[itemIndex].total_price = newQuantity * updatedItems[itemIndex].menu_item.price
-
-    setOrderForm((prev) => ({
+    setOrderForm(prev => ({
       ...prev,
-      items: updatedItems,
+      items: prev.items.map(item =>
+        item.menu_item_id === menuItemId
+          ? { ...item, quantity: newQuantity, total_price: newQuantity * item.menu_item.price }
+          : item
+      )
     }))
   }
 
-  const removeItemFromOrder = (itemIndex: number) => {
-    const updatedItems = orderForm.items.filter((_, index) => index !== itemIndex)
-    setOrderForm((prev) => ({
+  const removeItem = (menuItemId: string) => {
+    setOrderForm(prev => ({
       ...prev,
-      items: updatedItems,
+      items: prev.items.filter(item => item.menu_item_id !== menuItemId)
     }))
   }
 
-  const updateItemModifiers = (itemIndex: number, modifiers: string) => {
-    const updatedItems = [...orderForm.items]
-    updatedItems[itemIndex].modifiers = modifiers
-
-    setOrderForm((prev) => ({
+  const updateModifiers = (menuItemId: string, modifiers: string) => {
+    setOrderForm(prev => ({
       ...prev,
-      items: updatedItems,
+      items: prev.items.map(item =>
+        item.menu_item_id === menuItemId
+          ? { ...item, modifiers }
+          : item
+      )
     }))
   }
 
   const submitOrder = async () => {
     if (!orderForm.table_id || !orderForm.customer_name || orderForm.items.length === 0) {
       toast({
-        title: "Validation Error",
+        title: "Error",
         description: "Please fill in all required fields and add at least one item.",
         variant: "destructive",
       })
@@ -234,13 +231,12 @@ export default function NewOrderPage() {
     }
 
     setSubmitting(true)
-
     try {
       // Generate order number
       const orderNumber = `ORD-${Date.now()}`
 
       // Create order
-      const { data: orderData, error: orderError } = await supabase
+      const { data: order, error: orderError } = await supabase
         .from("orders")
         .insert({
           order_number: orderNumber,
@@ -250,8 +246,8 @@ export default function NewOrderPage() {
           subtotal: orderForm.subtotal,
           tax_amount: orderForm.tax_amount,
           total_amount: orderForm.total_amount,
-          created_by: user?.id,
           status: "active",
+          created_by: user?.id
         })
         .select()
         .single()
@@ -259,42 +255,33 @@ export default function NewOrderPage() {
       if (orderError) throw orderError
 
       // Create order items
-      const orderItems = orderForm.items.map((item) => ({
-        order_id: orderData.id,
+      const orderItems = orderForm.items.map(item => ({
+        order_id: order.id,
         menu_item_id: item.menu_item_id,
         quantity: item.quantity,
         unit_price: item.menu_item.price,
         total_price: item.total_price,
-        modifiers: item.modifiers,
+        modifiers: item.modifiers
       }))
 
-      const { error: itemsError } = await supabase.from("order_items").insert(orderItems)
+      const { error: itemsError } = await supabase
+        .from("order_items")
+        .insert(orderItems)
 
       if (itemsError) throw itemsError
 
       // Update table status
-      const { error: tableError } = await supabase
+      await supabase
         .from("restaurant_tables")
-        .update({ status: "in_kitchen" })
+        .update({ 
+          status: "occupied",
+          current_order_id: order.id
+        })
         .eq("id", orderForm.table_id)
 
-      if (tableError) throw tableError
-
-      // Update inventory
-      for (const item of orderForm.items) {
-        const { error: inventoryError } = await supabase.rpc("update_inventory_stock", {
-          p_menu_item_id: item.menu_item_id,
-          p_quantity_used: item.quantity,
-        })
-
-        if (inventoryError) {
-          console.error("Inventory update error:", inventoryError)
-        }
-      }
-
       toast({
-        title: "Order Created",
-        description: `Order ${orderNumber} has been created successfully.`,
+        title: "Success",
+        description: `Order ${orderNumber} has been created successfully!`,
       })
 
       router.push("/dashboard/orders")
@@ -310,11 +297,13 @@ export default function NewOrderPage() {
     }
   }
 
-  const filteredMenuItems = menuItems.filter((item) =>
-    selectedCategory ? item.category_id === selectedCategory : true,
+  const filteredMenuItems = menuItems.filter(item => 
+    selectedCategory ? item.category_id === selectedCategory : true
   )
 
-  const selectedTable = tables.find((table) => table.id === orderForm.table_id)
+  const getTablesByFloor = (floorId: string) => {
+    return tables.filter(table => table.floor_id === floorId)
+  }
 
   if (loading) {
     return (
@@ -328,12 +317,9 @@ export default function NewOrderPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Create New Order</h1>
-          <p className="text-gray-600 dark:text-gray-400">Take a new order for table service</p>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">New Order</h1>
+          <p className="text-gray-600 dark:text-gray-400">Create a new order for restaurant table</p>
         </div>
-        <Button variant="outline" onClick={() => router.back()}>
-          Cancel
-        </Button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -342,127 +328,100 @@ export default function NewOrderPage() {
           {/* Customer Information */}
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center">
-                <Users className="mr-2 h-5 w-5" />
-                Customer Information
-              </CardTitle>
+              <CardTitle>Customer Information</CardTitle>
+              <CardDescription>Enter customer details for the order</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="table">Table Selection</Label>
-                  <Select
-                    value={orderForm.table_id}
-                    onValueChange={(value) => setOrderForm((prev) => ({ ...prev, table_id: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a table" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {tables.map((table) => (
-                        <SelectItem key={table.id} value={table.id}>
-                          <div className="flex items-center space-x-2">
-                            <MapPin className="h-4 w-4" />
-                            <span>
-                              {table.floors?.floor_name} - Table {table.table_number}
-                            </span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="guest_count">Number of Guests</Label>
+                  <Label htmlFor="customer-name">Customer Name *</Label>
                   <Input
-                    id="guest_count"
+                    id="customer-name"
+                    placeholder="Enter customer name"
+                    value={orderForm.customer_name}
+                    onChange={(e) => setOrderForm(prev => ({ ...prev, customer_name: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="guest-count">Guest Count</Label>
+                  <Input
+                    id="guest-count"
                     type="number"
                     min="1"
                     value={orderForm.guest_count}
-                    onChange={(e) =>
-                      setOrderForm((prev) => ({
-                        ...prev,
-                        guest_count: Number.parseInt(e.target.value) || 1,
-                      }))
-                    }
+                    onChange={(e) => setOrderForm(prev => ({ ...prev, guest_count: parseInt(e.target.value) || 1 }))}
                   />
                 </div>
               </div>
-
+              
+              {/* Table Selection */}
               <div className="space-y-2">
-                <Label htmlFor="customer_name">Customer Name</Label>
-                <Input
-                  id="customer_name"
-                  placeholder="Enter customer name"
-                  value={orderForm.customer_name}
-                  onChange={(e) =>
-                    setOrderForm((prev) => ({
-                      ...prev,
-                      customer_name: e.target.value,
-                    }))
-                  }
-                />
+                <Label htmlFor="table">Select Table *</Label>
+                <Select value={orderForm.table_id} onValueChange={(value) => setOrderForm(prev => ({ ...prev, table_id: value }))}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose a table" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {floors.map((floor) => (
+                      <div key={floor.id}>
+                        <div className="font-medium text-sm text-gray-500 px-2 py-1">
+                          {floor.floor_name}
+                        </div>
+                        {getTablesByFloor(floor.id).map((table) => (
+                          <SelectItem key={table.id} value={table.id}>
+                            Table {table.table_number} (Capacity: {table.capacity})
+                          </SelectItem>
+                        ))}
+                      </div>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-
-              {selectedTable && (
-                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                  <div className="flex items-center space-x-2 text-sm">
-                    <MapPin className="h-4 w-4 text-blue-600" />
-                    <span className="font-medium">
-                      {selectedTable.floors?.floor_name} - Table {selectedTable.table_number}
-                    </span>
-                    <Badge variant="outline">Capacity: {selectedTable.capacity}</Badge>
-                  </div>
-                </div>
-              )}
             </CardContent>
           </Card>
 
-          {/* Menu Selection */}
+          {/* Menu Items */}
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center">
-                <Utensils className="mr-2 h-5 w-5" />
-                Menu Selection
-              </CardTitle>
+              <CardTitle>Menu Items</CardTitle>
+              <CardDescription>Select items to add to the order</CardDescription>
             </CardHeader>
             <CardContent>
               <Tabs value={selectedCategory} onValueChange={setSelectedCategory}>
-                <TabsList className="grid w-full grid-cols-2 lg:grid-cols-4">
-                  {categories.map((category) => (
+                <TabsList className="grid w-full grid-cols-4">
+                  {categories.slice(0, 4).map((category) => (
                     <TabsTrigger key={category.id} value={category.id}>
                       {category.name}
                     </TabsTrigger>
                   ))}
                 </TabsList>
-
+                
                 {categories.map((category) => (
                   <TabsContent key={category.id} value={category.id} className="mt-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {filteredMenuItems.map((item) => (
-                        <Card key={item.id} className="cursor-pointer hover:shadow-md transition-shadow">
-                          <CardContent className="p-4">
-                            <div className="flex justify-between items-start mb-2">
-                              <div className="flex-1">
-                                <div className="flex items-center space-x-2 mb-1">
-                                  <h3 className="font-medium">{item.name}</h3>
-                                  {item.sub_category === "veg" ? (
-                                    <Leaf className="h-4 w-4 text-green-600" />
-                                  ) : (
-                                    <Beef className="h-4 w-4 text-red-600" />
-                                  )}
-                                </div>
-                                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">{item.description}</p>
-                                <p className="text-lg font-bold text-blue-600">₹{item.price.toFixed(2)}</p>
-                              </div>
+                        <div key={item.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <h4 className="font-medium flex items-center gap-2">
+                                {item.name}
+                                {item.sub_category === "veg" ? (
+                                  <Leaf className="h-4 w-4 text-green-600" />
+                                ) : (
+                                  <Beef className="h-4 w-4 text-red-600" />
+                                )}
+                              </h4>
+                              <p className="text-sm text-gray-600 dark:text-gray-400">{item.description}</p>
                             </div>
-                            <Button size="sm" className="w-full" onClick={() => addItemToOrder(item)}>
-                              <Plus className="mr-2 h-4 w-4" />
-                              Add to Order
-                            </Button>
-                          </CardContent>
-                        </Card>
+                            <div className="text-right">
+                              <p className="font-bold">₹{item.price}</p>
+                              <Button size="sm" onClick={() => addItemToOrder(item)}>
+                                <Plus className="h-4 w-4 mr-1" />
+                                Add
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </TabsContent>
@@ -476,106 +435,85 @@ export default function NewOrderPage() {
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center">
-                <ShoppingCart className="mr-2 h-5 w-5" />
+              <CardTitle className="flex items-center gap-2">
+                <ShoppingCart className="h-5 w-5" />
                 Order Summary
               </CardTitle>
-              <CardDescription>{orderForm.items.length} items in cart</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {orderForm.items.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">No items added yet</div>
+                <p className="text-gray-500 text-center py-4">No items added yet</p>
               ) : (
                 <>
-                  {orderForm.items.map((item, index) => (
-                    <div key={index} className="space-y-3 pb-3 border-b last:border-b-0">
+                  {orderForm.items.map((item) => (
+                    <div key={item.menu_item_id} className="space-y-2">
                       <div className="flex justify-between items-start">
                         <div className="flex-1">
-                          <h4 className="font-medium">{item.menu_item.name}</h4>
-                          <p className="text-sm text-gray-600">₹{item.menu_item.price.toFixed(2)} each</p>
+                          <h5 className="font-medium">{item.menu_item.name}</h5>
+                          <p className="text-sm text-gray-600">₹{item.menu_item.price} each</p>
                         </div>
                         <div className="text-right">
-                          <p className="font-medium">₹{item.total_price.toFixed(2)}</p>
+                          <p className="font-medium">₹{item.total_price}</p>
+                          <div className="flex items-center gap-1 mt-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => updateItemQuantity(item.menu_item_id, item.quantity - 1)}
+                            >
+                              <Minus className="h-3 w-3" />
+                            </Button>
+                            <span className="w-8 text-center text-sm">{item.quantity}</span>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => updateItemQuantity(item.menu_item_id, item.quantity + 1)}
+                            >
+                              <Plus className="h-3 w-3" />
+                            </Button>
+                          </div>
                         </div>
                       </div>
-
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => updateItemQuantity(index, item.quantity - 1)}
-                          >
-                            <Minus className="h-3 w-3" />
-                          </Button>
-                          <span className="w-8 text-center">{item.quantity}</span>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => updateItemQuantity(index, item.quantity + 1)}
-                          >
-                            <Plus className="h-3 w-3" />
-                          </Button>
-                        </div>
-                        <Button size="sm" variant="destructive" onClick={() => removeItemFromOrder(index)}>
-                          Remove
-                        </Button>
-                      </div>
-
+                      
                       <div className="space-y-2">
-                        <Label htmlFor={`modifiers-${index}`} className="text-xs">
-                          Special Instructions
-                        </Label>
+                        <Label htmlFor={`modifiers-${item.menu_item_id}`} className="text-sm">Special Instructions</Label>
                         <Textarea
-                          id={`modifiers-${index}`}
-                          placeholder="e.g., less spicy, no onions"
+                          id={`modifiers-${item.menu_item_id}`}
+                          placeholder="e.g., No spicy, extra cheese..."
                           value={item.modifiers}
-                          onChange={(e) => updateItemModifiers(index, e.target.value)}
+                          onChange={(e) => updateModifiers(item.menu_item_id, e.target.value)}
                           className="text-sm"
                           rows={2}
                         />
                       </div>
+                      
+                      <Separator />
                     </div>
                   ))}
-
-                  <Separator />
-
-                  <div className="space-y-2">
+                  
+                  <div className="space-y-2 pt-2 border-t">
                     <div className="flex justify-between">
                       <span>Subtotal:</span>
                       <span>₹{orderForm.subtotal.toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between text-sm text-gray-600">
-                      <span>SGST (2.5%):</span>
-                      <span>₹{(orderForm.tax_amount / 2).toFixed(2)}</span>
+                    <div className="flex justify-between">
+                      <span>Tax (18%):</span>
+                      <span>₹{orderForm.tax_amount.toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between text-sm text-gray-600">
-                      <span>CGST (2.5%):</span>
-                      <span>₹{(orderForm.tax_amount / 2).toFixed(2)}</span>
-                    </div>
-                    <Separator />
-                    <div className="flex justify-between text-lg font-bold">
+                    <div className="flex justify-between font-bold text-lg">
                       <span>Total:</span>
                       <span>₹{orderForm.total_amount.toFixed(2)}</span>
                     </div>
                   </div>
-
-                  <Button
-                    className="w-full"
-                    onClick={submitOrder}
-                    disabled={submitting || orderForm.items.length === 0}
-                  >
-                    {submitting ? (
-                      <div className="flex items-center">
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                        Creating Order...
-                      </div>
-                    ) : (
-                      "Create Order"
-                    )}
-                  </Button>
                 </>
               )}
+              
+              <Button 
+                className="w-full" 
+                onClick={submitOrder}
+                disabled={submitting || orderForm.items.length === 0}
+              >
+                {submitting ? "Creating Order..." : "Create Order"}
+              </Button>
             </CardContent>
           </Card>
         </div>
