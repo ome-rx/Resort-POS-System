@@ -2,27 +2,21 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { createClient } from "@/lib/supabase"
+import { useAuth } from "@/lib/auth"
 import LoginForm from "@/components/auth/login-form"
 
 export default function HomePage() {
   const [loading, setLoading] = useState(true)
   const router = useRouter()
-  const supabase = createClient()
+  const { user } = useAuth()
 
   useEffect(() => {
-    const checkAuth = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-      if (session) {
-        router.push("/dashboard")
-      } else {
-        setLoading(false)
-      }
+    if (user) {
+      router.push("/dashboard")
+    } else {
+      setLoading(false)
     }
-    checkAuth()
-  }, [router, supabase.auth])
+  }, [user, router])
 
   if (loading) {
     return (

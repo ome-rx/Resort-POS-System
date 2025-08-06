@@ -1,18 +1,29 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams } from "next/navigation"
 import { createClient } from "@/lib/supabase"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Separator } from "@/components/ui/separator"
+import { Textarea } from "@/components/ui/textarea"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
-import { Plus, Minus, ShoppingCart, Users, MapPin, Utensils, Leaf, Beef, Clock } from "lucide-react"
+import { 
+  Plus, 
+  Minus, 
+  ShoppingCart, 
+  Users, 
+  UtensilsCrossed, 
+  Clock, 
+  CheckCircle, 
+  Download,
+  Receipt,
+  ChefHat,
+  Truck
+} from "lucide-react"
 
 interface Table {
   id: string
@@ -27,70 +38,114 @@ interface Category {
   id: string
   name: string
   description: string
+  display_order: number
 }
 
 interface MenuItem {
   id: string
   name: string
+  category_id: string
+  sub_category: string
   price: number
   description: string
-  sub_category: "veg" | "non_veg"
-  category_id: string
+  image_url: string | null
   is_available: boolean
+  categories: {
+    name: string
+  }
+  inventory: {
+    current_stock: number
+  }[]
 }
 
 interface OrderItem {
+  id: string
   menu_item_id: string
-  menu_item: MenuItem
   quantity: number
-  modifiers: string
+  unit_price: number
   total_price: number
+  modifiers: string
+  menu_item: MenuItem
 }
 
-interface CustomerOrder {
+interface Order {
+  id: string
+  order_number: string
   customer_name: string
   guest_count: number
-  items: OrderItem[]
+  status: string
   subtotal: number
   tax_amount: number
   total_amount: number
+  payment_status: string
+  created_at: string
+  order_items: {
+    id: string
+    quantity: number
+    unit_price: number
+    total_price: number
+    modifiers: string
+    is_prepared: boolean
+    menu_items: {
+      name: string
+      sub_category: string
+    }
+  }[]
+}
+
+interface CartItem {
+  menu_item: MenuItem
+  quantity: number
+  modifiers: string
 }
 
 export default function CustomerOrderPage() {
   const params = useParams()
-  const router = useRouter()
-  const { toast } = useToast()
   const tableId = params.tableId as string
-
+  const { toast } = useToast()
+  
   const [table, setTable] = useState<Table | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
+  const [cart, setCart] = useState<CartItem[]>([])
+  const [activeOrders, setActiveOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
-  const [submitting, setSubmitting] = useState(false)
-  const [selectedCategory, setSelectedCategory] = useState<string>("")
-
-  const [customerOrder, setCustomerOrder] = useState<CustomerOrder>({
-    customer_name: "",
-    guest_count: 1,
-    items: [],
-    subtotal: 0,
-    tax_amount: 0,
-    total_amount: 0,
-  })
-
+  const [selectedCategory, setSelectedCategory] = useState<string>("all")
+  const [customerName, setCustomerName] = useState("")
+  const [guestCount, setGuestCount] = useState(1)
+  const [orderPlaced, setOrderPlaced] = useState(false)
+  
   const supabase = createClient()
 
   useEffect(() => {
-    fetchData()
-  }, [tableId])
+    if (tableId) {
+      fetchData()
+      // Set up real-time subscription for order updates
+      const subscription = supabase
+        .channel('orders')
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: 'orders', filter: `table_id=eq.${tableId}` },
+          () => {
+            fetchActiveOrders()
+          }
+        )
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'order_items' },
+          () => {
+            fetchActiveOrders()
+          }
+        )
+        .subscribe()
 
-  useEffect(() => {
-    calculateTotals()
-  }, [customerOrder.items])
+      return () => {
+        supabase.removeChannel(subscription)
+      }
+    }
+  }, [tableId])
 
   const fetchData = async () => {
     try {
-      // Fetch table information
+      // Fetch table info
       const { data: tableData, error: tableError } = await supabase
         .from("restaurant_tables")
         .select(`
@@ -98,48 +153,38 @@ export default function CustomerOrderPage() {
           floors(floor_name)
         `)
         .eq("id", tableId)
-        .eq("is_active", true)
         .single()
 
       if (tableError) throw tableError
-      if (!tableData) {
-        toast({
-          title: "Table Not Found",
-          description: "The requested table could not be found.",
-          variant: "destructive",
-        })
-        return
-      }
-
-      // Check if table is available
-      if (tableData.status !== "available") {
-        toast({
-          title: "Table Unavailable",
-          description: "This table is currently occupied or being served.",
-          variant: "destructive",
-        })
-        return
-      }
-
       setTable(tableData)
 
       // Fetch categories
-      const { data: categoriesData } = await supabase
+      const { data: categoriesData, error: categoriesError } = await supabase
         .from("categories")
         .select("*")
         .eq("is_active", true)
         .order("display_order")
 
-      // Fetch available menu items
-      const { data: menuItemsData } = await supabase.from("menu_items").select("*").eq("is_available", true)
+      if (categoriesError) throw categoriesError
+      setCategories(categoriesData || [])
 
-      if (categoriesData) {
-        setCategories(categoriesData)
-        if (categoriesData.length > 0) {
-          setSelectedCategory(categoriesData[0].id)
-        }
-      }
-      if (menuItemsData) setMenuItems(menuItemsData)
+      // Fetch menu items with inventory
+      const { data: menuData, error: menuError } = await supabase
+        .from("menu_items")
+        .select(`
+          *,
+          categories(name),
+          inventory(current_stock)
+        `)
+        .eq("is_available", true)
+        .order("name")
+
+      if (menuError) throw menuError
+      setMenuItems(menuData || [])
+
+      // Fetch active orders for this table
+      await fetchActiveOrders()
+
     } catch (error) {
       console.error("Error fetching data:", error)
       toast({
@@ -152,95 +197,104 @@ export default function CustomerOrderPage() {
     }
   }
 
-  const calculateTotals = () => {
-    const subtotal = customerOrder.items.reduce((sum, item) => sum + item.total_price, 0)
-    const tax_amount = subtotal * 0.05 // 5% tax (2.5% SGST + 2.5% CGST)
-    const total_amount = subtotal + tax_amount
+  const fetchActiveOrders = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("orders")
+        .select(`
+          *,
+          order_items(
+            id,
+            quantity,
+            unit_price,
+            total_price,
+            modifiers,
+            is_prepared,
+            menu_items(name, sub_category)
+          )
+        `)
+        .eq("table_id", tableId)
+        .in("status", ["active", "ongoing", "serving"])
+        .order("created_at", { ascending: false })
 
-    setCustomerOrder((prev) => ({
-      ...prev,
-      subtotal,
-      tax_amount,
-      total_amount,
-    }))
-  }
-
-  const addItemToOrder = (menuItem: MenuItem) => {
-    const existingItemIndex = customerOrder.items.findIndex((item) => item.menu_item_id === menuItem.id)
-
-    if (existingItemIndex >= 0) {
-      const updatedItems = [...customerOrder.items]
-      updatedItems[existingItemIndex].quantity += 1
-      updatedItems[existingItemIndex].total_price = updatedItems[existingItemIndex].quantity * menuItem.price
-
-      setCustomerOrder((prev) => ({
-        ...prev,
-        items: updatedItems,
-      }))
-    } else {
-      const newItem: OrderItem = {
-        menu_item_id: menuItem.id,
-        menu_item: menuItem,
-        quantity: 1,
-        modifiers: "",
-        total_price: menuItem.price,
-      }
-
-      setCustomerOrder((prev) => ({
-        ...prev,
-        items: [...prev.items, newItem],
-      }))
+      if (error) throw error
+      setActiveOrders(data || [])
+    } catch (error) {
+      console.error("Error fetching active orders:", error)
     }
   }
 
-  const updateItemQuantity = (itemIndex: number, newQuantity: number) => {
-    if (newQuantity <= 0) {
-      removeItemFromOrder(itemIndex)
+  const addToCart = (menuItem: MenuItem) => {
+    const existingItem = cart.find(item => item.menu_item.id === menuItem.id)
+    
+    if (existingItem) {
+      setCart(cart.map(item => 
+        item.menu_item.id === menuItem.id 
+          ? { ...item, quantity: item.quantity + 1 }
+          : item
+      ))
+    } else {
+      setCart([...cart, { menu_item: menuItem, quantity: 1, modifiers: "" }])
+    }
+    
+    toast({
+      title: "Added to Cart",
+      description: `${menuItem.name} added to your cart.`,
+    })
+  }
+
+  const updateItemQuantity = (index: number, newQuantity: number) => {
+    if (newQuantity === 0) {
+      removeItemFromOrder(index)
       return
     }
-
-    const updatedItems = [...customerOrder.items]
-    updatedItems[itemIndex].quantity = newQuantity
-    updatedItems[itemIndex].total_price = newQuantity * updatedItems[itemIndex].menu_item.price
-
-    setCustomerOrder((prev) => ({
-      ...prev,
-      items: updatedItems,
-    }))
+    
+    const updatedCart = [...cart]
+    updatedCart[index].quantity = newQuantity
+    setCart(updatedCart)
   }
 
-  const removeItemFromOrder = (itemIndex: number) => {
-    const updatedItems = customerOrder.items.filter((_, index) => index !== itemIndex)
-    setCustomerOrder((prev) => ({
-      ...prev,
-      items: updatedItems,
-    }))
+  const updateItemModifiers = (index: number, modifiers: string) => {
+    const updatedCart = [...cart]
+    updatedCart[index].modifiers = modifiers
+    setCart(updatedCart)
   }
 
-  const updateItemModifiers = (itemIndex: number, modifiers: string) => {
-    const updatedItems = [...customerOrder.items]
-    updatedItems[itemIndex].modifiers = modifiers
-
-    setCustomerOrder((prev) => ({
-      ...prev,
-      items: updatedItems,
-    }))
+  const removeItemFromOrder = (index: number) => {
+    setCart(cart.filter((_, i) => i !== index))
   }
 
-  const submitOrder = async () => {
-    if (!customerOrder.customer_name || customerOrder.items.length === 0) {
+  const calculateTotal = () => {
+    const subtotal = cart.reduce((sum, item) => sum + (item.menu_item.price * item.quantity), 0)
+    const taxAmount = subtotal * 0.18 // 18% tax
+    return {
+      subtotal,
+      taxAmount,
+      total: subtotal + taxAmount
+    }
+  }
+
+  const placeOrder = async () => {
+    if (cart.length === 0) {
       toast({
-        title: "Validation Error",
-        description: "Please enter your name and add at least one item.",
+        title: "Empty Cart",
+        description: "Please add items to your cart before placing an order.",
         variant: "destructive",
       })
       return
     }
 
-    setSubmitting(true)
+    if (!customerName.trim()) {
+      toast({
+        title: "Customer Name Required",
+        description: "Please enter your name to place the order.",
+        variant: "destructive",
+      })
+      return
+    }
 
     try {
-      // Generate order number
+      const { subtotal, taxAmount, total } = calculateTotal()
       const orderNumber = `ORD-${Date.now()}`
 
       // Create order
@@ -249,13 +303,13 @@ export default function CustomerOrderPage() {
         .insert({
           order_number: orderNumber,
           table_id: tableId,
-          customer_name: customerOrder.customer_name,
-          guest_count: customerOrder.guest_count,
-          subtotal: customerOrder.subtotal,
-          tax_amount: customerOrder.tax_amount,
-          total_amount: customerOrder.total_amount,
+          customer_name: customerName,
+          guest_count: guestCount,
           status: "active",
-          payment_status: "pending",
+          subtotal: subtotal,
+          tax_amount: taxAmount,
+          total_amount: total,
+          payment_status: "pending"
         })
         .select()
         .single()
@@ -263,65 +317,198 @@ export default function CustomerOrderPage() {
       if (orderError) throw orderError
 
       // Create order items
-      const orderItems = customerOrder.items.map((item) => ({
+      const orderItems = cart.map(item => ({
         order_id: orderData.id,
-        menu_item_id: item.menu_item_id,
+        menu_item_id: item.menu_item.id,
         quantity: item.quantity,
         unit_price: item.menu_item.price,
-        total_price: item.total_price,
-        modifiers: item.modifiers,
+        total_price: item.menu_item.price * item.quantity,
+        modifiers: item.modifiers
       }))
 
-      const { error: itemsError } = await supabase.from("order_items").insert(orderItems)
+      const { error: itemsError } = await supabase
+        .from("order_items")
+        .insert(orderItems)
 
       if (itemsError) throw itemsError
 
       // Update table status
-      const { error: tableError } = await supabase
+      await supabase
         .from("restaurant_tables")
         .update({ status: "in_kitchen" })
         .eq("id", tableId)
 
-      if (tableError) throw tableError
-
-      // Update inventory
-      for (const item of customerOrder.items) {
-        const { error: inventoryError } = await supabase.rpc("update_inventory_stock", {
-          p_menu_item_id: item.menu_item_id,
-          p_quantity_used: item.quantity,
-        })
-
-        if (inventoryError) {
-          console.error("Inventory update error:", inventoryError)
-        }
-      }
-
+      // Clear cart and show success
+      setCart([])
+      setOrderPlaced(true)
+      
       toast({
         title: "Order Placed Successfully!",
         description: `Your order ${orderNumber} has been sent to the kitchen.`,
       })
 
-      // Redirect to order confirmation page
-      router.push(`/order/${tableId}/confirmation/${orderData.id}`)
+      // Refresh active orders
+      fetchActiveOrders()
+
     } catch (error) {
-      console.error("Error creating order:", error)
+      console.error("Error placing order:", error)
       toast({
         title: "Error",
         description: "Failed to place order. Please try again.",
         variant: "destructive",
       })
-    } finally {
-      setSubmitting(false)
     }
   }
 
-  const filteredMenuItems = menuItems.filter((item) =>
-    selectedCategory ? item.category_id === selectedCategory : true,
-  )
+  const downloadReceipt = async (order: Order) => {
+    try {
+      const receiptContent = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Order Receipt - ${order.order_number}</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 400px; margin: 0 auto; padding: 20px; }
+        .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 15px; }
+        .order-info { margin-bottom: 15px; }
+        .items { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        .items th, .items td { border-bottom: 1px solid #ddd; padding: 8px; text-align: left; }
+        .items th { background-color: #f5f5f5; }
+        .total-section { border-top: 2px solid #000; padding-top: 10px; margin-top: 15px; }
+        .footer { margin-top: 20px; text-align: center; font-size: 12px; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .status.active { background-color: #e3f2fd; color: #1976d2; }
+        .status.ongoing { background-color: #fff3e0; color: #f57c00; }
+        .status.serving { background-color: #e8f5e8; color: #388e3c; }
+        @media print { body { margin: 0; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>RESORT RESTAURANT</h2>
+        <p>Order Receipt</p>
+        <h3>Order #${order.order_number}</h3>
+    </div>
+    
+    <div class="order-info">
+        <strong>Date:</strong> ${new Date(order.created_at).toLocaleDateString()}<br>
+        <strong>Time:</strong> ${new Date(order.created_at).toLocaleTimeString()}<br>
+        <strong>Table:</strong> ${table?.floors.floor_name} - Table ${table?.table_number}<br>
+        <strong>Customer:</strong> ${order.customer_name}<br>
+        <strong>Guests:</strong> ${order.guest_count}
+    </div>
+    
+    <div class="status ${order.status}">
+        <strong>Status:</strong> ${order.status.toUpperCase()}
+    </div>
+    
+    <table class="items">
+        <thead>
+            <tr>
+                <th>Item</th>
+                <th>Qty</th>
+                <th>Rate</th>
+                <th>Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${order.order_items.map(item => `
+                <tr>
+                    <td>
+                        ${item.menu_items.name} ${item.is_prepared ? '✓' : '⏳'}
+                        ${item.modifiers ? `<br><small style="color: #666;">${item.modifiers}</small>` : ''}
+                    </td>
+                    <td>${item.quantity}</td>
+                    <td>₹${item.unit_price.toFixed(2)}</td>
+                    <td>₹${item.total_price.toFixed(2)}</td>
+                </tr>
+            `).join('')}
+        </tbody>
+    </table>
+    
+    <div class="total-section">
+        <div style="display: flex; justify-content: space-between;">
+            <strong>Subtotal:</strong>
+            <strong>₹${order.subtotal.toFixed(2)}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+            <strong>Tax (18%):</strong>
+            <strong>₹${order.tax_amount.toFixed(2)}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 18px; margin-top: 10px;">
+            <strong>TOTAL:</strong>
+            <strong>₹${order.total_amount.toFixed(2)}</strong>
+        </div>
+    </div>
+    
+    <div class="footer">
+        <p>Thank you for your order!</p>
+        <p>Your food is being prepared with care</p>
+        <p style="margin-top: 15px; font-size: 10px;">Generated on ${new Date().toLocaleString()}</p>
+    </div>
+</body>
+</html>
+      `
+
+      const printWindow = window.open('', '_blank')
+      if (printWindow) {
+        printWindow.document.write(receiptContent)
+        printWindow.document.close()
+        printWindow.focus()
+        printWindow.print()
+        printWindow.close()
+      }
+
+      toast({
+        title: "Receipt Downloaded",
+        description: "Your receipt has been opened for download/printing.",
+      })
+    } catch (error) {
+      console.error("Error downloading receipt:", error)
+      toast({
+        title: "Error",
+        description: "Failed to download receipt.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const getOrderStatusInfo = (status: string) => {
+    switch (status) {
+      case "active":
+        return {
+          icon: Clock,
+          color: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100",
+          message: "Order received - Being prepared in kitchen"
+        }
+      case "ongoing":
+        return {
+          icon: ChefHat,
+          color: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100",
+          message: "Currently cooking - Almost ready!"
+        }
+      case "serving":
+        return {
+          icon: Truck,
+          color: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
+          message: "Ready to serve - Will be delivered shortly"
+        }
+      default:
+        return {
+          icon: CheckCircle,
+          color: "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-100",
+          message: "Order status unknown"
+        }
+    }
+  }
+
+  const filteredMenuItems = selectedCategory === "all" 
+    ? menuItems 
+    : menuItems.filter(item => item.category_id === selectedCategory)
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
       </div>
     )
@@ -329,267 +516,318 @@ export default function CustomerOrderPage() {
 
   if (!table) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-        <Card className="max-w-md">
-          <CardContent className="text-center py-8">
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Table Not Available</h3>
-            <p className="text-gray-600 dark:text-gray-400">This table is not available for ordering.</p>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Table Not Found</h1>
+          <p className="text-gray-600">The requested table could not be found.</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Header */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div>
-              <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Resort Restaurant</h1>
-              <div className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400">
-                <MapPin className="h-4 w-4" />
-                <span>
-                  {table.floors.floor_name} - Table {table.table_number}
-                </span>
-                <Users className="h-4 w-4 ml-2" />
-                <span>Capacity: {table.capacity}</span>
-              </div>
-            </div>
-            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-              Available for Ordering
-            </Badge>
-          </div>
-        </div>
-      </div>
+    <div className="min-h-screen bg-gray-50 p-4">
+      <div className="max-w-4xl mx-auto space-y-6">
+        {/* Header */}
+        <Card>
+          <CardHeader className="text-center">
+            <CardTitle className="text-2xl">Resort Restaurant</CardTitle>
+            <CardDescription>
+              {table.floors.floor_name} - Table {table.table_number} (Capacity: {table.capacity} guests)
+            </CardDescription>
+          </CardHeader>
+        </Card>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Customer Information & Menu */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Customer Information */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Users className="mr-2 h-5 w-5" />
-                  Your Information
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="customer_name">Your Name</Label>
-                    <Input
-                      id="customer_name"
-                      placeholder="Enter your name"
-                      value={customerOrder.customer_name}
-                      onChange={(e) =>
-                        setCustomerOrder((prev) => ({
-                          ...prev,
-                          customer_name: e.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="guest_count">Number of People</Label>
-                    <Input
-                      id="guest_count"
-                      type="number"
-                      min="1"
-                      max={table.capacity}
-                      value={customerOrder.guest_count}
-                      onChange={(e) =>
-                        setCustomerOrder((prev) => ({
-                          ...prev,
-                          guest_count: Number.parseInt(e.target.value) || 1,
-                        }))
-                      }
-                    />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Menu Selection */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Utensils className="mr-2 h-5 w-5" />
-                  Our Menu
-                </CardTitle>
-                <CardDescription>Select items to add to your order</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Tabs value={selectedCategory} onValueChange={setSelectedCategory}>
-                  <TabsList className="grid w-full grid-cols-2 lg:grid-cols-4">
-                    {categories.map((category) => (
-                      <TabsTrigger key={category.id} value={category.id}>
-                        {category.name}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-
-                  {categories.map((category) => (
-                    <TabsContent key={category.id} value={category.id} className="mt-6">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {filteredMenuItems.map((item) => (
-                          <Card key={item.id} className="cursor-pointer hover:shadow-md transition-shadow">
-                            <CardContent className="p-4">
-                              <div className="flex justify-between items-start mb-2">
-                                <div className="flex-1">
-                                  <div className="flex items-center space-x-2 mb-1">
-                                    <h3 className="font-medium">{item.name}</h3>
-                                    {item.sub_category === "veg" ? (
-                                      <Leaf className="h-4 w-4 text-green-600" />
-                                    ) : (
-                                      <Beef className="h-4 w-4 text-red-600" />
-                                    )}
-                                  </div>
-                                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">{item.description}</p>
-                                  <p className="text-lg font-bold text-blue-600">₹{item.price.toFixed(2)}</p>
-                                </div>
-                              </div>
-                              <Button size="sm" className="w-full" onClick={() => addItemToOrder(item)}>
-                                <Plus className="mr-2 h-4 w-4" />
-                                Add to Order
-                              </Button>
-                            </CardContent>
-                          </Card>
-                        ))}
+        {/* Active Orders Status */}
+        {activeOrders.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Receipt className="mr-2 h-5 w-5" />
+                Your Active Orders
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {activeOrders.map((order) => {
+                const statusInfo = getOrderStatusInfo(order.status)
+                const StatusIcon = statusInfo.icon
+                const preparedItems = order.order_items.filter(item => item.is_prepared).length
+                
+                return (
+                  <div key={order.id} className="border rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h4 className="font-medium">{order.order_number}</h4>
+                        <p className="text-sm text-gray-500">
+                          {new Date(order.created_at).toLocaleString()}
+                        </p>
                       </div>
-                    </TabsContent>
-                  ))}
-                </Tabs>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Order Summary */}
-          <div className="space-y-6">
-            <Card className="sticky top-6">
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <ShoppingCart className="mr-2 h-5 w-5" />
-                  Your Order
-                </CardTitle>
-                <CardDescription>{customerOrder.items.length} items selected</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {customerOrder.items.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500">
-                    <ShoppingCart className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-                    <p>No items added yet</p>
-                    <p className="text-sm">Browse our menu and add items to get started</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="max-h-96 overflow-y-auto space-y-3">
-                      {customerOrder.items.map((item, index) => (
-                        <div key={index} className="space-y-3 pb-3 border-b last:border-b-0">
-                          <div className="flex justify-between items-start">
-                            <div className="flex-1">
-                              <h4 className="font-medium">{item.menu_item.name}</h4>
-                              <p className="text-sm text-gray-600">₹{item.menu_item.price.toFixed(2)} each</p>
-                            </div>
-                            <div className="text-right">
-                              <p className="font-medium">₹{item.total_price.toFixed(2)}</p>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center space-x-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => updateItemQuantity(index, item.quantity - 1)}
-                              >
-                                <Minus className="h-3 w-3" />
-                              </Button>
-                              <span className="w-8 text-center">{item.quantity}</span>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => updateItemQuantity(index, item.quantity + 1)}
-                              >
-                                <Plus className="h-3 w-3" />
-                              </Button>
-                            </div>
-                            <Button size="sm" variant="destructive" onClick={() => removeItemFromOrder(index)}>
-                              Remove
-                            </Button>
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label htmlFor={`modifiers-${index}`} className="text-xs">
-                              Special Instructions
-                            </Label>
-                            <Textarea
-                              id={`modifiers-${index}`}
-                              placeholder="e.g., less spicy, no onions"
-                              value={item.modifiers}
-                              onChange={(e) => updateItemModifiers(index, e.target.value)}
-                              className="text-sm"
-                              rows={2}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <Separator />
-
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span>Subtotal:</span>
-                        <span>₹{customerOrder.subtotal.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm text-gray-600">
-                        <span>SGST (2.5%):</span>
-                        <span>₹{(customerOrder.tax_amount / 2).toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm text-gray-600">
-                        <span>CGST (2.5%):</span>
-                        <span>₹{(customerOrder.tax_amount / 2).toFixed(2)}</span>
-                      </div>
-                      <Separator />
-                      <div className="flex justify-between text-lg font-bold">
-                        <span>Total:</span>
-                        <span>₹{customerOrder.total_amount.toFixed(2)}</span>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
                       <Button
-                        className="w-full"
-                        onClick={submitOrder}
-                        disabled={submitting || customerOrder.items.length === 0 || !customerOrder.customer_name}
+                        size="sm"
+                        variant="outline"
+                        onClick={() => downloadReceipt(order)}
                       >
-                        {submitting ? (
-                          <div className="flex items-center">
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                            Placing Order...
-                          </div>
-                        ) : (
-                          <>
-                            <Clock className="mr-2 h-4 w-4" />
-                            Place Order
-                          </>
-                        )}
+                        <Download className="h-4 w-4 mr-1" />
+                        Receipt
                       </Button>
-
-                      <p className="text-xs text-gray-500 text-center">
-                        Your order will be sent directly to our kitchen. Estimated preparation time: 15-25 minutes.
+                    </div>
+                    
+                    <div className="flex items-center mb-3">
+                      <StatusIcon className="h-5 w-5 mr-2" />
+                      <Badge className={statusInfo.color}>
+                        {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                      </Badge>
+                      <span className="ml-2 text-sm text-gray-600">{statusInfo.message}</span>
+                    </div>
+                    
+                    <div className="text-sm text-gray-600">
+                      <div className="flex justify-between">
+                        <span>Items: {order.order_items.length}</span>
+                        <span>Prepared: {preparedItems}/{order.order_items.length}</span>
+                        <span className="font-medium">₹{order.total_amount.toFixed(2)}</span>
+                      </div>
+                    </div>
+                    
+                    {/* Progress bar */}
+                    <div className="mt-3">
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div 
+                          className="bg-green-600 h-2 rounded-full transition-all duration-300"
+                          style={{ 
+                            width: `${(preparedItems / order.order_items.length) * 100}%` 
+                          }}
+                        ></div>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {preparedItems === order.order_items.length 
+                          ? "All items prepared - Ready to serve!" 
+                          : `${preparedItems} of ${order.order_items.length} items ready`
+                        }
                       </p>
                     </div>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+                  </div>
+                )
+              })}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Customer Details */}
+        {!orderPlaced && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Order Details</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="customer-name">Your Name</Label>
+                  <Input
+                    id="customer-name"
+                    placeholder="Enter your name"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="guest-count">Number of Guests</Label>
+                  <Select value={guestCount.toString()} onValueChange={(value) => setGuestCount(parseInt(value))}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Array.from({ length: table.capacity }, (_, i) => i + 1).map((num) => (
+                        <SelectItem key={num} value={num.toString()}>
+                          {num} {num === 1 ? 'Guest' : 'Guests'}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Menu Categories */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Menu Categories</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant={selectedCategory === "all" ? "default" : "outline"}
+                onClick={() => setSelectedCategory("all")}
+                size="sm"
+              >
+                All Items
+              </Button>
+              {categories.map((category) => (
+                <Button
+                  key={category.id}
+                  variant={selectedCategory === category.id ? "default" : "outline"}
+                  onClick={() => setSelectedCategory(category.id)}
+                  size="sm"
+                >
+                  {category.name}
+                </Button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Menu Items */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredMenuItems.map((item) => {
+            const stock = item.inventory && item.inventory.length > 0 ? item.inventory[0].current_stock : 0
+            const inStock = stock > 0
+            
+            return (
+              <Card key={item.id} className={!inStock ? "opacity-50" : ""}>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg">{item.name}</CardTitle>
+                    <Badge variant="outline" className={
+                      item.sub_category === 'veg' 
+                        ? 'bg-green-50 text-green-700' 
+                        : 'bg-red-50 text-red-700'
+                    }>
+                      {item.sub_category === 'veg' ? 'VEG' : 'NON-VEG'}
+                    </Badge>
+                  </div>
+                  <CardDescription>{item.description}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xl font-bold">₹{item.price.toFixed(2)}</span>
+                    {inStock ? (
+                      <Button onClick={() => addToCart(item)} size="sm">
+                        <Plus className="h-4 w-4 mr-1" />
+                        Add
+                      </Button>
+                    ) : (
+                      <Badge variant="outline" className="bg-red-50 text-red-700">
+                        Out of Stock
+                      </Badge>
+                    )}
+                  </div>
+                  {stock > 0 && stock <= 5 && (
+                    <p className="text-xs text-orange-600 mt-1">Only {stock} left!</p>
+                  )}
+                </CardContent>
+              </Card>
+            )
+          })}
         </div>
+
+        {/* Cart */}
+        {cart.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <ShoppingCart className="mr-2 h-5 w-5" />
+                Your Order ({cart.length} items)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {cart.map((item, index) => (
+                <div key={index} className="border rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="font-medium">{item.menu_item.name}</h4>
+                    <div className="flex items-center space-x-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => updateItemQuantity(index, item.quantity - 1)}
+                      >
+                        <Minus className="h-3 w-3" />
+                      </Button>
+                      <span className="w-8 text-center">{item.quantity}</span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => updateItemQuantity(index, item.quantity + 1)}
+                      >
+                        <Plus className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <Button size="sm" variant="destructive" onClick={() => removeItemFromOrder(index)}>
+                      Remove
+                    </Button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor={`modifiers-${index}`} className="text-xs">
+                      Special Instructions
+                    </Label>
+                    <Textarea
+                      id={`modifiers-${index}`}
+                      placeholder="e.g., less spicy, no onions"
+                      value={item.modifiers}
+                      onChange={(e) => updateItemModifiers(index, e.target.value)}
+                      className="text-sm"
+                      rows={2}
+                    />
+                  </div>
+
+                  <div className="flex justify-between items-center mt-2">
+                    <span className="text-sm text-gray-600">
+                      ₹{item.menu_item.price.toFixed(2)} × {item.quantity}
+                    </span>
+                    <span className="font-medium">
+                      ₹{(item.menu_item.price * item.quantity).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+
+              {/* Order Total */}
+              <div className="border-t pt-4">
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span>Subtotal:</span>
+                    <span>₹{calculateTotal().subtotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Tax (18%):</span>
+                    <span>₹{calculateTotal().taxAmount.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-lg font-bold">
+                    <span>Total:</span>
+                    <span>₹{calculateTotal().total.toFixed(2)}</span>
+                  </div>
+                </div>
+                
+                <Button 
+                  onClick={placeOrder} 
+                  className="w-full mt-4" 
+                  size="lg"
+                  disabled={!customerName.trim()}
+                >
+                  <UtensilsCrossed className="mr-2 h-5 w-5" />
+                  Place Order
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Success Message */}
+        {orderPlaced && cart.length === 0 && (
+          <Card>
+            <CardContent className="text-center py-8">
+              <CheckCircle className="h-16 w-16 text-green-600 mx-auto mb-4" />
+              <h2 className="text-2xl font-bold text-green-800 mb-2">Order Placed Successfully!</h2>
+              <p className="text-gray-600 mb-4">
+                Your order has been sent to the kitchen. You can track its progress above.
+              </p>
+              <Button onClick={() => setOrderPlaced(false)}>
+                Order More Items
+              </Button>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   )

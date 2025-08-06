@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -10,7 +9,6 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Eye, EyeOff, LogIn } from "lucide-react"
-import { createClient } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 
 export default function LoginForm() {
@@ -21,7 +19,6 @@ export default function LoginForm() {
   const [error, setError] = useState("")
   const router = useRouter()
   const { toast } = useToast()
-  const supabase = createClient()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -29,28 +26,45 @@ export default function LoginForm() {
     setError("")
 
     try {
-      // First, get user by username
-      const { data: userData, error: userError } = await supabase
-        .from("users")
-        .select("*")
-        .eq("username", username)
-        .eq("is_active", true)
-        .single()
-
-      if (userError || !userData) {
-        setError("Invalid username or password")
-        setLoading(false)
-        return
-      }
-
-      // For demo purposes, we'll use a simple password check
-      // In production, you'd verify the hashed password
+      // Demo credentials for testing
       const validCredentials = [
-        { username: "super-admin", password: "super-admin" },
-        { username: "owner", password: "owner123" },
-        { username: "manager", password: "manager123" },
-        { username: "waiter", password: "waiter123" },
-        { username: "chef", password: "chef123" },
+        {
+          username: "super-admin",
+          password: "super-admin",
+          role: "super_admin",
+          full_name: "Super Administrator",
+          email: "admin@resort.com",
+        },
+        {
+          username: "owner",
+          password: "owner123",
+          role: "owner",
+          full_name: "Resort Owner",
+          email: "owner@resort.com",
+        },
+        {
+          username: "manager",
+          password: "manager123",
+          role: "manager",
+          full_name: "Restaurant Manager",
+          email: "manager@resort.com",
+        },
+        { username: "waiter", password: "waiter123", role: "waiter", full_name: "Waiter", email: "waiter@resort.com" },
+        { username: "chef", password: "chef123", role: "chef", full_name: "Head Chef", email: "chef@resort.com" },
+        {
+          username: "admin",
+          password: "password123",
+          role: "super_admin",
+          full_name: "Administrator",
+          email: "admin@resort.com",
+        },
+        {
+          username: "waiter1",
+          password: "password123",
+          role: "waiter",
+          full_name: "Waiter 1",
+          email: "waiter1@resort.com",
+        },
       ]
 
       const validUser = validCredentials.find((cred) => cred.username === username && cred.password === password)
@@ -61,7 +75,17 @@ export default function LoginForm() {
         return
       }
 
-      // Create a session (simplified for demo)
+      // Create user object
+      const userData = {
+        id: `user_${validUser.username}`,
+        username: validUser.username,
+        role: validUser.role,
+        full_name: validUser.full_name,
+        email: validUser.email,
+        is_active: true,
+      }
+
+      // Store user data in localStorage
       localStorage.setItem("user", JSON.stringify(userData))
 
       toast({
@@ -69,6 +93,7 @@ export default function LoginForm() {
         description: `Welcome back, ${userData.full_name}!`,
       })
 
+      // Redirect to dashboard
       router.push("/dashboard")
     } catch (err) {
       setError("An error occurred during login")
@@ -158,6 +183,12 @@ export default function LoginForm() {
             </p>
             <p>
               <strong>Chef:</strong> chef / chef123
+            </p>
+            <p>
+              <strong>Admin:</strong> admin / password123
+            </p>
+            <p>
+              <strong>Waiter 1:</strong> waiter1 / password123
             </p>
           </div>
         </div>

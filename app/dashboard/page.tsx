@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react"
 import { useAuth } from "@/lib/auth"
-import { createClient } from "@/lib/supabase"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { DollarSign, ShoppingCart, Clock, TrendingUp, Users, ChefHat, Receipt, Package } from "lucide-react"
@@ -22,62 +21,22 @@ interface DashboardStats {
 export default function DashboardPage() {
   const { user } = useAuth()
   const [stats, setStats] = useState<DashboardStats>({
-    todayRevenue: 0,
-    averageOrderValue: 0,
-    pendingOrders: 0,
-    takeawayOrders: 0,
-    activeOrders: 0,
-    ongoingOrders: 0,
-    completedOrders: 0,
-    lowStockItems: 0,
+    todayRevenue: 2450.75,
+    averageOrderValue: 485.15,
+    pendingOrders: 3,
+    takeawayOrders: 2,
+    activeOrders: 5,
+    ongoingOrders: 2,
+    completedOrders: 12,
+    lowStockItems: 4,
   })
-  const [loading, setLoading] = useState(true)
-  const supabase = createClient()
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    fetchDashboardStats()
+    // For demo purposes, we'll use mock data
+    // In production, you would fetch real data from Supabase
+    setLoading(false)
   }, [])
-
-  const fetchDashboardStats = async () => {
-    try {
-      const today = new Date().toISOString().split("T")[0]
-
-      // Fetch today's orders
-      const { data: todayOrders } = await supabase
-        .from("orders")
-        .select("total_amount, status")
-        .gte("created_at", `${today}T00:00:00`)
-        .lte("created_at", `${today}T23:59:59`)
-
-      // Fetch low stock items
-      const { data: lowStock } = await supabase
-        .from("inventory")
-        .select("current_stock, low_stock_threshold")
-        .lt("current_stock", 10)
-
-      const todayRevenue = todayOrders?.reduce((sum, order) => sum + Number(order.total_amount), 0) || 0
-      const averageOrderValue = todayOrders?.length ? todayRevenue / todayOrders.length : 0
-
-      const pendingOrders = todayOrders?.filter((order) => order.status === "active").length || 0
-      const ongoingOrders = todayOrders?.filter((order) => order.status === "ongoing").length || 0
-      const completedOrders = todayOrders?.filter((order) => order.status === "completed").length || 0
-
-      setStats({
-        todayRevenue,
-        averageOrderValue,
-        pendingOrders,
-        takeawayOrders: 0, // Placeholder
-        activeOrders: pendingOrders,
-        ongoingOrders,
-        completedOrders,
-        lowStockItems: lowStock?.length || 0,
-      })
-    } catch (error) {
-      console.error("Error fetching dashboard stats:", error)
-    } finally {
-      setLoading(false)
-    }
-  }
 
   if (loading) {
     return (
@@ -101,7 +60,10 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
+          <p className="text-gray-600 dark:text-gray-400">Welcome back, {user?.full_name}!</p>
+        </div>
         <div className="flex space-x-2">
           <Button asChild>
             <Link href="/dashboard/orders/new">Create New Order</Link>

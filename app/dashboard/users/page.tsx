@@ -22,11 +22,12 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { useToast } from "@/hooks/use-toast"
-import { Plus, Edit, Trash2, Search, Users, Key } from "lucide-react"
+import { Plus, Edit, Trash2, Search, Users, Key, Eye, EyeOff } from "lucide-react"
 
 interface User {
   id: string
   username: string
+  password_hash: string
   role: string
   full_name: string
   email?: string
@@ -53,6 +54,9 @@ export default function UsersPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [roleFilter, setRoleFilter] = useState("all")
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [passwordViewDialog, setPasswordViewDialog] = useState(false)
+  const [selectedUserForPassword, setSelectedUserForPassword] = useState<User | null>(null)
+  const [showPasswords, setShowPasswords] = useState<{ [key: string]: boolean }>({})
   const [editingUser, setEditingUser] = useState<User | null>(null)
   const [formData, setFormData] = useState<UserFormData>({
     username: "",
@@ -105,7 +109,7 @@ export default function UsersPage() {
 
         // Only update password if provided
         if (formData.password) {
-          updateData.password_hash = formData.password // In production, hash this
+          updateData.password_hash = formData.password // Store plain text for demo (hash in production)
         }
 
         const { error } = await supabase.from("users").update(updateData).eq("id", editingUser.id)
@@ -117,10 +121,26 @@ export default function UsersPage() {
           description: "User has been updated successfully.",
         })
       } else {
-        // Create new user
+        // Create new user - Check if username already exists
+        const { data: existingUser } = await supabase
+          .from("users")
+          .select("username")
+          .eq("username", formData.username)
+          .single()
+
+        if (existingUser) {
+          toast({
+            title: "Username Exists",
+            description: "This username is already taken. Please choose another.",
+            variant: "destructive",
+          })
+          return
+        }
+
+        // Create new user with plain text password (for demo - hash in production)
         const { error } = await supabase.from("users").insert({
           username: formData.username,
-          password_hash: formData.password, // In production, hash this
+          password_hash: formData.password, // Store plain text for demo
           role: formData.role,
           full_name: formData.full_name,
           email: formData.email,
@@ -132,7 +152,7 @@ export default function UsersPage() {
 
         toast({
           title: "User Created",
-          description: "New user has been created successfully.",
+          description: `New user "${formData.username}" has been created successfully. They can now log in.`,
         })
       }
 
@@ -164,8 +184,8 @@ export default function UsersPage() {
     setDialogOpen(true)
   }
 
-  const handleDelete = async (userId: string) => {
-    if (!confirm("Are you sure you want to delete this user?")) return
+  const handleDelete = async (userId: string, username: string) => {
+    if (!confirm(`Are you sure you want to delete user "${username}"?`)) return
 
     try {
       const { error } = await supabase.from("users").delete().eq("id", userId)
@@ -214,10 +234,19 @@ export default function UsersPage() {
     const newPassword = prompt(`Enter new password for ${username}:`)
     if (!newPassword) return
 
+    if (newPassword.length < 6) {
+      toast({
+        title: "Password Too Short",
+        description: "Password must be at least 6 characters long.",
+        variant: "destructive",
+      })
+      return
+    }
+
     try {
       const { error } = await supabase
         .from("users")
-        .update({ password_hash: newPassword }) // In production, hash this
+        .update({ password_hash: newPassword }) // Store plain text for demo
         .eq("id", userId)
 
       if (error) throw error
@@ -234,6 +263,18 @@ export default function UsersPage() {
         variant: "destructive",
       })
     }
+  }
+
+  const viewPassword = (user: User) => {
+    setSelectedUserForPassword(user)
+    setPasswordViewDialog(true)
+  }
+
+  const togglePasswordVisibility = (userId: string) => {
+    setShowPasswords(prev => ({
+      ...prev,
+      [userId]: !prev[userId]
+    }))
   }
 
   const resetForm = () => {
@@ -318,7 +359,7 @@ export default function UsersPage() {
             <DialogHeader>
               <DialogTitle>{editingUser ? "Edit User" : "Add New User"}</DialogTitle>
               <DialogDescription>
-                {editingUser ? "Update user details and permissions." : "Create a new user account."}
+                {editingUser ? "Update user details and permissions." : "Create a new user account with login access."}
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -330,7 +371,11 @@ export default function UsersPage() {
                   onChange={(e) => setFormData((prev) => ({ ...prev, username: e.target.value }))}
                   required
                   disabled={!!editingUser}
+                  placeholder="Enter unique username"
                 />
+                {!editingUser && (
+                  <p className="text-xs text-gray-500">Used for logging into the system</p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -343,7 +388,10 @@ export default function UsersPage() {
                   value={formData.password}
                   onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
                   required={!editingUser}
+                  placeholder="Enter secure password"
+                  minLength={6}
                 />
+                <p className="text-xs text-gray-500">Minimum 6 characters</p>
               </div>
 
               <div className="space-y-2">
@@ -353,6 +401,7 @@ export default function UsersPage() {
                   value={formData.full_name}
                   onChange={(e) => setFormData((prev) => ({ ...prev, full_name: e.target.value }))}
                   required
+                  placeholder="Enter full name"
                 />
               </div>
 
@@ -388,6 +437,7 @@ export default function UsersPage() {
                   type="email"
                   value={formData.email}
                   onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
+                  placeholder="Enter email address"
                 />
               </div>
 
@@ -395,8 +445,10 @@ export default function UsersPage() {
                 <Label htmlFor="phone">Phone (Optional)</Label>
                 <Input
                   id="phone"
+                  type="tel"
                   value={formData.phone}
                   onChange={(e) => setFormData((prev) => ({ ...prev, phone: e.target.value }))}
+                  placeholder="Enter phone number"
                 />
               </div>
 
@@ -406,14 +458,16 @@ export default function UsersPage() {
                   checked={formData.is_active}
                   onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, is_active: checked }))}
                 />
-                <Label htmlFor="is_active">Active User</Label>
+                <Label htmlFor="is_active">Active (can login)</Label>
               </div>
 
               <div className="flex justify-end space-x-2">
                 <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit">{editingUser ? "Update User" : "Create User"}</Button>
+                <Button type="submit">
+                  {editingUser ? "Update User" : "Create User"}
+                </Button>
               </div>
             </form>
           </DialogContent>
@@ -426,14 +480,14 @@ export default function UsersPage() {
           <CardTitle>Filters</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="search">Search Users</Label>
               <div className="relative">
                 <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                 <Input
                   id="search"
-                  placeholder="Search by name, username, or email..."
+                  placeholder="Name, username, or email"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
@@ -442,7 +496,7 @@ export default function UsersPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="role-filter">Role</Label>
+              <Label htmlFor="role">Role</Label>
               <Select value={roleFilter} onValueChange={setRoleFilter}>
                 <SelectTrigger>
                   <SelectValue placeholder="All roles" />
@@ -467,7 +521,7 @@ export default function UsersPage() {
       <Card>
         <CardHeader>
           <CardTitle>System Users ({filteredUsers.length})</CardTitle>
-          <CardDescription>Manage user accounts and permissions</CardDescription>
+          <CardDescription>Manage user accounts and access permissions</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
@@ -483,48 +537,66 @@ export default function UsersPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredUsers.map((user) => (
-                  <TableRow key={user.id}>
+                {filteredUsers.map((userData) => (
+                  <TableRow key={userData.id}>
                     <TableCell>
                       <div>
-                        <div className="font-medium">{user.full_name}</div>
-                        <div className="text-sm text-gray-500">@{user.username}</div>
+                        <div className="font-medium">{userData.full_name}</div>
+                        <div className="text-sm text-gray-500">@{userData.username}</div>
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge className={getRoleColor(user.role)}>{user.role.replace("_", " ").toUpperCase()}</Badge>
+                      <Badge className={getRoleColor(userData.role)}>
+                        {userData.role.replace('_', ' ').toUpperCase()}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       <div className="text-sm">
-                        {user.email && <div>{user.email}</div>}
-                        {user.phone && <div>{user.phone}</div>}
-                        {!user.email && !user.phone && <span className="text-gray-400">No contact info</span>}
+                        {userData.email && <div>{userData.email}</div>}
+                        {userData.phone && <div>{userData.phone}</div>}
+                        {!userData.email && !userData.phone && (
+                          <span className="text-gray-400">No contact info</span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Switch
+                        checked={userData.is_active}
+                        onCheckedChange={(checked) => toggleUserStatus(userData.id, checked)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm">
+                        {new Date(userData.created_at).toLocaleDateString()}
                       </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center space-x-2">
-                        <Switch
-                          checked={user.is_active}
-                          onCheckedChange={(checked) => toggleUserStatus(user.id, checked)}
-                        />
-                        <Badge variant={user.is_active ? "default" : "secondary"}>
-                          {user.is_active ? "Active" : "Inactive"}
-                        </Badge>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="text-sm text-gray-500">{new Date(user.created_at).toLocaleDateString()}</div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center space-x-2">
-                        <Button size="sm" variant="outline" onClick={() => handleEdit(user)}>
+                        <Button size="sm" variant="outline" onClick={() => handleEdit(userData)}>
                           <Edit className="h-4 w-4" />
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => resetPassword(user.id, user.username)}>
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          onClick={() => viewPassword(userData)}
+                          title="View Password"
+                        >
                           <Key className="h-4 w-4" />
                         </Button>
-                        {user.id !== user?.id && (
-                          <Button size="sm" variant="destructive" onClick={() => handleDelete(user.id)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => resetPassword(userData.id, userData.username)}
+                          title="Reset Password"
+                        >
+                          <Key className="h-4 w-4" />
+                        </Button>
+                        {userData.username !== "super-admin" && (
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => handleDelete(userData.id, userData.username)}
+                          >
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         )}
@@ -539,11 +611,63 @@ export default function UsersPage() {
           {filteredUsers.length === 0 && (
             <div className="text-center py-8">
               <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-500">No users found.</p>
+              <p className="text-gray-500">No users found matching your criteria.</p>
             </div>
           )}
         </CardContent>
       </Card>
+
+      {/* Password View Dialog */}
+      <Dialog open={passwordViewDialog} onOpenChange={setPasswordViewDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>View Password</DialogTitle>
+            <DialogDescription>
+              Password for {selectedUserForPassword?.full_name} (@{selectedUserForPassword?.username})
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedUserForPassword && (
+            <div className="space-y-4">
+              <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <Label>Password:</Label>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => togglePasswordVisibility(selectedUserForPassword.id)}
+                  >
+                    {showPasswords[selectedUserForPassword.id] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <div className="font-mono text-lg mt-2">
+                  {showPasswords[selectedUserForPassword.id] 
+                    ? selectedUserForPassword.password_hash 
+                    : "••••••••••"
+                  }
+                </div>
+              </div>
+              
+              <div className="text-sm text-gray-600">
+                <p><strong>Note:</strong> This is the current password for this user account.</p>
+                <p><strong>Security:</strong> Passwords should be kept confidential and changed regularly.</p>
+              </div>
+
+              <div className="flex justify-end space-x-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => resetPassword(selectedUserForPassword.id, selectedUserForPassword.username)}
+                >
+                  Reset Password
+                </Button>
+                <Button onClick={() => setPasswordViewDialog(false)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
