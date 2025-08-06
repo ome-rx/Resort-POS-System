@@ -1,8 +1,8 @@
 'use client'
 
-import React, { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 
-export type UserRole = 'super-admin' | 'owner' | 'manager' | 'waiter' | 'chef' | 'admin'
+export type UserRole = 'super_admin' | 'owner' | 'manager' | 'waiter' | 'chef' | 'admin'
 
 export interface User {
   id: string
@@ -21,7 +21,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-// Demo users for authentication
+// Fixed: Changed DEMO_PASSWORDS to DEMO_USERS
 const DEMO_USERS: Record<string, { password: string; user: User }> = {
   'super-admin': {
     password: 'super-admin',
@@ -29,7 +29,7 @@ const DEMO_USERS: Record<string, { password: string; user: User }> = {
       id: '1',
       username: 'super-admin',
       email: 'superadmin@resort.com',
-      role: 'super-admin',
+      role: 'super_admin',
       full_name: 'Super Administrator'
     }
   },
@@ -114,22 +114,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const signIn = async (username: string, password: string): Promise<boolean> => {
-    setLoading(true)
-    
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    
-    // Check demo credentials
-    if (DEMO_USERS[username] && DEMO_PASSWORDS[username] === password) {
-      const user = DEMO_USERS[username]
-      setUser(user)
-      localStorage.setItem('resort-pos-user', JSON.stringify(user))
-      setLoading(false)
-      return true
+    try {
+      const demoUser = DEMO_USERS[username]
+      
+      if (demoUser && demoUser.password === password) {
+        // Fixed: Only pass the user object, not the entire demo user object
+        setUser(demoUser.user)
+        localStorage.setItem('resort-pos-user', JSON.stringify(demoUser.user))
+        return true
+      }
+      
+      return false
+    } catch (error) {
+      console.error('Login error:', error)
+      return false
     }
-    
-    setLoading(false)
-    return false
   }
 
   const signOut = () => {
@@ -144,7 +143,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
-export const useAuth = () => {
+export function useAuth() {
   const context = useContext(AuthContext)
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider')
@@ -152,6 +151,6 @@ export const useAuth = () => {
   return context
 }
 
-export function hasPermission(userRole: string, requiredRoles: string[]): boolean {
-  return requiredRoles.includes(userRole)
+export function hasPermission(userRole: string, allowedRoles: string[]): boolean {
+  return allowedRoles.includes(userRole)
 }
