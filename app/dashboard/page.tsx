@@ -1,192 +1,377 @@
-'use client'
+"use client"
 
-import { useAuth } from '@/lib/auth'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Users, ShoppingCart, DollarSign, TrendingUp, Table, ChefHat, Clock, AlertTriangle } from 'lucide-react'
+import { useEffect, useState } from "react"
+import { useAuth } from "@/lib/auth"
+import { createClient } from "@/lib/supabase"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { DollarSign, ShoppingCart, Clock, TrendingUp, Users, ChefHat, Receipt, Package } from "lucide-react"
 import Link from "next/link"
+
+interface DashboardStats {
+  todayRevenue: number
+  averageOrderValue: number
+  pendingOrders: number
+  takeawayOrders: number
+  activeOrders: number
+  ongoingOrders: number
+  completedOrders: number
+  lowStockItems: number
+}
 
 export default function DashboardPage() {
   const { user } = useAuth()
+  const [stats, setStats] = useState<DashboardStats>({
+    todayRevenue: 0,
+    averageOrderValue: 0,
+    pendingOrders: 0,
+    takeawayOrders: 0,
+    activeOrders: 0,
+    ongoingOrders: 0,
+    completedOrders: 0,
+    lowStockItems: 0,
+  })
+  const [loading, setLoading] = useState(true)
+  const supabase = createClient()
 
-  // Mock data for dashboard stats
-  const stats = [
-    {
-      title: "Total Tables",
-      value: "24",
-      change: "+12%",
-      icon: Table,
-      color: "text-blue-600",
-    },
-    {
-      title: "Active Orders",
-      value: "12",
-      change: "+8%",
-      icon: ShoppingCart,
-      color: "text-green-600",
-    },
-    {
-      title: "Today's Revenue",
-      value: "₹15,240",
-      change: "+12%",
-      icon: DollarSign,
-      color: "text-yellow-600",
-    },
-    {
-      title: "Staff Online",
-      value: "8",
-      change: "+5%",
-      icon: Users,
-      color: "text-purple-600",
-    },
-  ]
+  useEffect(() => {
+    fetchDashboardStats()
+  }, [])
 
-  const recentOrders = [
-    { id: 'ORD-001', table: 'Table 5', items: 3, status: 'preparing', time: '10 mins ago' },
-    { id: 'ORD-002', table: 'Table 12', items: 2, status: 'served', time: '15 mins ago' },
-    { id: 'ORD-003', table: 'Table 8', items: 4, amount: 680, status: 'pending', time: '20 mins ago' },
-    { id: 'ORD-004', table: 'Table 3', items: 1, amount: 150, status: 'ready', time: '25 mins ago' },
-  ]
+  const fetchDashboardStats = async () => {
+    try {
+      const today = new Date().toISOString().split("T")[0]
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'pending': return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-100'
-      case 'preparing': return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100'
-      case 'ready': return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100'
-      case 'served': return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-100'
-      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-100'
+      // Fetch today's orders
+      const { data: todayOrders } = await supabase
+        .from("orders")
+        .select("total_amount, status")
+        .gte("created_at", `${today}T00:00:00`)
+        .lte("created_at", `${today}T23:59:59`)
+
+      // Fetch low stock items
+      const { data: lowStock } = await supabase
+        .from("inventory")
+        .select("current_stock, low_stock_threshold")
+        .lt("current_stock", 10)
+
+      const todayRevenue = todayOrders?.reduce((sum, order) => sum + Number(order.total_amount), 0) || 0
+      const averageOrderValue = todayOrders?.length ? todayRevenue / todayOrders.length : 0
+
+      const pendingOrders = todayOrders?.filter((order) => order.status === "active").length || 0
+      const ongoingOrders = todayOrders?.filter((order) => order.status === "ongoing").length || 0
+      const completedOrders = todayOrders?.filter((order) => order.status === "completed").length || 0
+
+      setStats({
+        todayRevenue,
+        averageOrderValue,
+        pendingOrders,
+        takeawayOrders: 0, // Placeholder
+        activeOrders: pendingOrders,
+        ongoingOrders,
+        completedOrders,
+        lowStockItems: lowStock?.length || 0,
+      })
+    } catch (error) {
+      console.error("Error fetching dashboard stats:", error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    )
+  }
+
+  const getDashboardContent = () => {
+    switch (user?.role) {
+      case "chef":
+        return <ChefDashboard stats={stats} />
+      case "waiter":
+        return <WaiterDashboard stats={stats} />
+      default:
+        return <AdminDashboard stats={stats} />
     }
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            Dashboard
-          </h1>
-          <p className="text-gray-600 dark:text-gray-400">
-            Welcome back, {user?.full_name}! Here's what's happening at your restaurant today.
-          </p>
-        </div>
-        <div className="text-sm text-gray-500 dark:text-gray-400">
-          Role: <span className="capitalize font-medium">{user?.role?.replace('-', ' ')}</span>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
+        <div className="flex space-x-2">
+          <Button asChild>
+            <Link href="/dashboard/orders/new">Create New Order</Link>
+          </Button>
         </div>
       </div>
 
-      {/* Stats Grid */}
+      {getDashboardContent()}
+    </div>
+  )
+}
+
+function AdminDashboard({ stats }: { stats: DashboardStats }) {
+  return (
+    <>
+      {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat, index) => (
-          <Card key={index}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                {stat.title}
-              </CardTitle>
-              <stat.icon className={`h-4 w-4 ${stat.color}`} />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stat.value}</div>
-              <p className="text-xs text-muted-foreground">
-                <span className="text-green-600 dark:text-green-400">
-                  {stat.change}
-                </span>{" "}
-                from yesterday
-              </p>
-            </CardContent>
-          </Card>
-        ))}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Today's Revenue</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">₹{stats.todayRevenue.toFixed(2)}</div>
+            <p className="text-xs text-muted-foreground">Resets every 24 hours</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Average Order Value</CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">₹{stats.averageOrderValue.toFixed(2)}</div>
+            <p className="text-xs text-muted-foreground">Per order today</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Pending Orders</CardTitle>
+            <Clock className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.pendingOrders}</div>
+            <p className="text-xs text-muted-foreground">Awaiting preparation</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Low Stock Items</CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600">{stats.lowStockItems}</div>
+            <p className="text-xs text-muted-foreground">Need restocking</p>
+          </CardContent>
+        </Card>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* Quick Actions */}
+      {/* Real-time Order Tracking */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5" />
-              Quick Actions
+            <CardTitle className="flex items-center">
+              <Clock className="mr-2 h-5 w-5 text-blue-600" />
+              Active Orders
             </CardTitle>
-            <CardDescription>
-              Common tasks based on your role
-            </CardDescription>
+            <CardDescription>Orders pending preparation</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {user?.role === 'waiter' && (
-                <>
-                  <div className="flex items-center p-3 border rounded-lg hover:bg-muted cursor-pointer">
-                    <Table className="h-5 w-5 mr-3 text-blue-600" />
-                    <span>View Table Status</span>
-                  </div>
-                  <div className="flex items-center p-3 border rounded-lg hover:bg-muted cursor-pointer">
-                    <ShoppingCart className="h-5 w-5 mr-3 text-green-600" />
-                    <span>Take New Order</span>
-                  </div>
-                </>
-              )}
-              {user?.role === 'chef' && (
-                <>
-                  <div className="flex items-center p-3 border rounded-lg hover:bg-muted cursor-pointer">
-                    <ChefHat className="h-5 w-5 mr-3 text-orange-600" />
-                    <span>Kitchen Orders</span>
-                  </div>
-                  <div className="flex items-center p-3 border rounded-lg hover:bg-muted cursor-pointer">
-                    <Clock className="h-5 w-5 mr-3 text-yellow-600" />
-                    <span>Order Queue</span>
-                  </div>
-                </>
-              )}
-              {(user?.role === 'manager' || user?.role === 'owner' || user?.role === 'admin') && (
-                <>
-                  <div className="flex items-center p-3 border rounded-lg hover:bg-muted cursor-pointer">
-                    <Receipt className="h-5 w-5 mr-3 text-purple-600" />
-                    <span>View Reports</span>
-                  </div>
-                  <div className="flex items-center p-3 border rounded-lg hover:bg-muted cursor-pointer">
-                    <Users className="h-5 w-5 mr-3 text-blue-600" />
-                    <span>Manage Staff</span>
-                  </div>
-                </>
-              )}
-            </div>
+            <div className="text-3xl font-bold text-blue-600">{stats.activeOrders}</div>
           </CardContent>
         </Card>
 
-        {/* Recent Orders */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Recent Orders</CardTitle>
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/dashboard/orders">
-                <Eye className="h-4 w-4 mr-2" />
-                View All
-              </Link>
-            </Button>
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <ChefHat className="mr-2 h-5 w-5 text-orange-600" />
+              Ongoing Orders
+            </CardTitle>
+            <CardDescription>Currently being prepared</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {recentOrders.map((order, index) => (
-                <div
-                  key={index}
-                  className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
-                >
-                  <div className="flex items-center space-x-3">
-                    <div>
-                      <p className="font-medium">{order.id}</p>
-                      <p className="text-sm text-muted-foreground">{order.table}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Badge className={getStatusColor(order.status)}>
-                      {order.status}
-                    </Badge>
-                    <span className="text-sm text-muted-foreground">{order.time}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <div className="text-3xl font-bold text-orange-600">{stats.ongoingOrders}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <Receipt className="mr-2 h-5 w-5 text-green-600" />
+              Completed Orders
+            </CardTitle>
+            <CardDescription>Ready for serving</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-green-600">{stats.completedOrders}</div>
           </CardContent>
         </Card>
       </div>
-    </div>
+
+      {/* Quick Actions */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Quick Actions</CardTitle>
+          <CardDescription>Common tasks and shortcuts</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Button asChild className="h-20 flex-col">
+              <Link href="/dashboard/orders/new">
+                <ShoppingCart className="h-6 w-6 mb-2" />
+                Create Order
+              </Link>
+            </Button>
+            <Button asChild variant="outline" className="h-20 flex-col bg-transparent">
+              <Link href="/dashboard/reports">
+                <TrendingUp className="h-6 w-6 mb-2" />
+                View Reports
+              </Link>
+            </Button>
+            <Button asChild variant="outline" className="h-20 flex-col bg-transparent">
+              <Link href="/dashboard/inventory">
+                <Package className="h-6 w-6 mb-2" />
+                Manage Inventory
+              </Link>
+            </Button>
+            <Button asChild variant="outline" className="h-20 flex-col bg-transparent">
+              <Link href="/dashboard/tables">
+                <Users className="h-6 w-6 mb-2" />
+                Table Status
+              </Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </>
+  )
+}
+
+function ChefDashboard({ stats }: { stats: DashboardStats }) {
+  return (
+    <>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <Clock className="mr-2 h-5 w-5 text-blue-600" />
+              New Orders
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-blue-600">{stats.activeOrders}</div>
+            <p className="text-sm text-muted-foreground">Ready to prepare</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <ChefHat className="mr-2 h-5 w-5 text-orange-600" />
+              In Progress
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-orange-600">{stats.ongoingOrders}</div>
+            <p className="text-sm text-muted-foreground">Currently cooking</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <Receipt className="mr-2 h-5 w-5 text-green-600" />
+              Ready to Serve
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-green-600">{stats.completedOrders}</div>
+            <p className="text-sm text-muted-foreground">Completed today</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Kitchen Actions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Button asChild className="h-16 flex-col">
+              <Link href="/dashboard/kitchen">
+                <ChefHat className="h-6 w-6 mb-2" />
+                Kitchen Display System
+              </Link>
+            </Button>
+            <Button asChild variant="outline" className="h-16 flex-col bg-transparent">
+              <Link href="/dashboard/orders">
+                <Receipt className="h-6 w-6 mb-2" />
+                View All Orders
+              </Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </>
+  )
+}
+
+function WaiterDashboard({ stats }: { stats: DashboardStats }) {
+  return (
+    <>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <Clock className="mr-2 h-5 w-5 text-blue-600" />
+              Active Orders
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-blue-600">{stats.activeOrders}</div>
+            <p className="text-sm text-muted-foreground">Orders in kitchen</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <Receipt className="mr-2 h-5 w-5 text-green-600" />
+              Ready to Serve
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-green-600">{stats.completedOrders}</div>
+            <p className="text-sm text-muted-foreground">Ready for pickup</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Waiter Actions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Button asChild className="h-16 flex-col">
+              <Link href="/dashboard/orders/new">
+                <ShoppingCart className="h-6 w-6 mb-2" />
+                Take Order
+              </Link>
+            </Button>
+            <Button asChild variant="outline" className="h-16 flex-col bg-transparent">
+              <Link href="/dashboard/tables">
+                <Users className="h-6 w-6 mb-2" />
+                Table Status
+              </Link>
+            </Button>
+            <Button asChild variant="outline" className="h-16 flex-col bg-transparent">
+              <Link href="/dashboard/orders">
+                <Receipt className="h-6 w-6 mb-2" />
+                View Orders
+              </Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </>
   )
 }

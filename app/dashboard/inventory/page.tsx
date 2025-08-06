@@ -74,9 +74,6 @@ export default function InventoryPage() {
 
       if (error) throw error
       setInventory(data || [])
-
-      // Auto-update menu item availability based on stock
-      await updateMenuAvailability()
     } catch (error) {
       console.error("Error fetching inventory:", error)
       toast({
@@ -86,29 +83,6 @@ export default function InventoryPage() {
       })
     } finally {
       setLoading(false)
-    }
-  }
-
-  const updateMenuAvailability = async () => {
-    try {
-      // Get items that are out of stock
-      const outOfStockItems = inventory.filter(item => item.current_stock === 0)
-      
-      // Update menu items to unavailable if out of stock
-      for (const item of outOfStockItems) {
-        await supabase
-          .from("menu_items")
-          .update({ is_available: false })
-          .eq("id", item.menu_items.id)
-      }
-
-      // Get items that are back in stock
-      const inStockItems = inventory.filter(item => item.current_stock > 0)
-      
-      // You might want to manually enable these, but for now we'll leave them as they are
-      // This prevents automatically enabling items that were manually disabled
-    } catch (error) {
-      console.error("Error updating menu availability:", error)
     }
   }
 
@@ -131,17 +105,9 @@ export default function InventoryPage() {
 
       if (error) throw error
 
-      // If item was out of stock and now has stock, enable it in menu
-      if (selectedItem.current_stock === 0 && newCurrentStock > 0) {
-        await supabase
-          .from("menu_items")
-          .update({ is_available: true })
-          .eq("id", selectedItem.menu_items.id)
-      }
-
       toast({
         title: "Stock Updated",
-        description: `Added ${restockQuantity} units to ${selectedItem.menu_items.name}. Menu item availability updated.`,
+        description: `Added ${restockQuantity} units to ${selectedItem.menu_items.name}`,
       })
 
       setRestockDialog(false)
@@ -192,7 +158,7 @@ export default function InventoryPage() {
     item.menu_items.name.toLowerCase().includes(searchTerm.toLowerCase()),
   )
 
-  const lowStockItems = inventory.filter((item) => item.current_stock <= item.low_stock_threshold && item.current_stock > 0)
+  const lowStockItems = inventory.filter((item) => item.current_stock <= item.low_stock_threshold)
   const outOfStockItems = inventory.filter((item) => item.current_stock === 0)
 
   if (!hasPermission(user?.role || "", ["super_admin", "owner", "manager"])) {
@@ -219,12 +185,12 @@ export default function InventoryPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Inventory Management</h1>
-          <p className="text-gray-600 dark:text-gray-400">Track and manage restaurant inventory with automatic menu synchronization</p>
+          <p className="text-gray-600 dark:text-gray-400">Track and manage restaurant inventory</p>
         </div>
       </div>
 
       {/* Inventory Stats */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Items</CardTitle>
@@ -239,7 +205,7 @@ export default function InventoryPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Low Stock</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-orange-600" />
+            <AlertTriangle className="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-600">{lowStockItems.length}</div>
@@ -250,7 +216,7 @@ export default function InventoryPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Out of Stock</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-red-600" />
+            <TrendingDown className="h-4 w-4 text-red-500" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-red-600">{outOfStockItems.length}</div>
@@ -260,14 +226,14 @@ export default function InventoryPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Stock</CardTitle>
-            <TrendingUp className="h-4 w-4 text-green-600" />
+            <CardTitle className="text-sm font-medium">Total Stock Value</CardTitle>
+            <TrendingUp className="h-4 w-4 text-green-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">
-              {inventory.reduce((sum, item) => sum + item.current_stock, 0)}
+            <div className="text-2xl font-bold">
+              ₹{inventory.reduce((sum, item) => sum + item.current_stock * item.menu_items.price, 0).toFixed(2)}
             </div>
-            <p className="text-xs text-muted-foreground">Units available</p>
+            <p className="text-xs text-muted-foreground">Current inventory value</p>
           </CardContent>
         </Card>
       </div>
@@ -294,7 +260,7 @@ export default function InventoryPage() {
       <Card>
         <CardHeader>
           <CardTitle>Inventory Items ({filteredInventory.length})</CardTitle>
-          <CardDescription>Manage stock levels and restock items. Menu availability is automatically updated.</CardDescription>
+          <CardDescription>Manage stock levels and restock items</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
@@ -306,6 +272,7 @@ export default function InventoryPage() {
                   <TableHead>Current Stock</TableHead>
                   <TableHead>Low Stock Alert</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Value</TableHead>
                   <TableHead>Last Restocked</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -345,29 +312,21 @@ export default function InventoryPage() {
                           {stockStatus.status === "good" && "In Stock"}
                         </Badge>
                       </TableCell>
+                      <TableCell className="font-medium">
+                        ₹{(item.current_stock * item.menu_items.price).toFixed(2)}
+                      </TableCell>
                       <TableCell>
                         {item.last_restocked_at ? (
                           <div>
                             <div className="text-sm">{new Date(item.last_restocked_at).toLocaleDateString()}</div>
-                            {item.users && (
-                              <div className="text-xs text-gray-500">by {item.users.full_name}</div>
-                            )}
+                            {item.users && <div className="text-xs text-gray-500">by {item.users.full_name}</div>}
                           </div>
                         ) : (
-                          <span className="text-gray-400">Never</span>
+                          <span className="text-gray-500">Never</span>
                         )}
                       </TableCell>
                       <TableCell>
-                        <Dialog
-                          open={restockDialog && selectedItem?.id === item.id}
-                          onOpenChange={(open) => {
-                            setRestockDialog(open)
-                            if (!open) {
-                              setSelectedItem(null)
-                              setRestockQuantity(0)
-                            }
-                          }}
-                        >
+                        <Dialog open={restockDialog && selectedItem?.id === item.id} onOpenChange={setRestockDialog}>
                           <DialogTrigger asChild>
                             <Button
                               size="sm"
@@ -380,12 +339,10 @@ export default function InventoryPage() {
                               Restock
                             </Button>
                           </DialogTrigger>
-                          <DialogContent className="max-w-md">
+                          <DialogContent>
                             <DialogHeader>
                               <DialogTitle>Restock Item</DialogTitle>
-                              <DialogDescription>
-                                Add stock to {item.menu_items.name}
-                              </DialogDescription>
+                              <DialogDescription>Add stock for {item.menu_items.name}</DialogDescription>
                             </DialogHeader>
                             <div className="space-y-4">
                               <div className="grid grid-cols-2 gap-4 text-sm">
@@ -415,29 +372,17 @@ export default function InventoryPage() {
                                 <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                                   <div className="text-sm">
                                     <div>
-                                      <strong>New Current Stock:</strong> {item.current_stock + restockQuantity} units
+                                      New Stock Level: <strong>{item.current_stock + restockQuantity} units</strong>
                                     </div>
                                     <div>
-                                      <strong>New Total Made:</strong> {item.total_quantity + restockQuantity} units
+                                      New Total Made: <strong>{item.total_quantity + restockQuantity} units</strong>
                                     </div>
-                                    {item.current_stock === 0 && (
-                                      <div className="text-green-600 mt-2">
-                                        ✓ This item will be automatically enabled in the menu
-                                      </div>
-                                    )}
                                   </div>
                                 </div>
                               )}
 
                               <div className="flex justify-end space-x-2">
-                                <Button
-                                  variant="outline"
-                                  onClick={() => {
-                                    setRestockDialog(false)
-                                    setSelectedItem(null)
-                                    setRestockQuantity(0)
-                                  }}
-                                >
+                                <Button variant="outline" onClick={() => setRestockDialog(false)}>
                                   Cancel
                                 </Button>
                                 <Button onClick={handleRestock} disabled={restockQuantity <= 0}>
@@ -458,7 +403,7 @@ export default function InventoryPage() {
           {filteredInventory.length === 0 && (
             <div className="text-center py-8">
               <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-500">No inventory items found matching your search.</p>
+              <p className="text-gray-500">No inventory items found.</p>
             </div>
           )}
         </CardContent>

@@ -9,172 +9,138 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useToast } from "@/hooks/use-toast"
-import { 
-  BarChart3, 
-  Download, 
-  Calendar, 
-  DollarSign, 
-  Receipt, 
-  Users, 
-  TrendingUp,
-  CreditCard,
-  Banknote,
-  Smartphone,
-  Building
-} from "lucide-react"
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  LineChart,
+  Line,
+} from "recharts"
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
+import { Download, FileText, TrendingUp, DollarSign, ShoppingCart, Users, Calendar } from "lucide-react"
 import * as XLSX from "xlsx"
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from "recharts"
 
-interface OrderReport {
-  id: string
-  order_number: string
-  customer_name: string
-  table_number: number
-  floor_name: string
-  guest_count: number
-  subtotal: number
-  tax_amount: number
-  total_amount: number
-  payment_method: string | null
-  payment_status: string
-  created_at: string
-  order_items: {
-    quantity: number
-    unit_price: number
-    total_price: number
-    menu_items: {
-      name: string
-      sub_category: string
-      categories: {
-        name: string
-      }
-    }
+interface ReportData {
+  daily: {
+    date: string
+    revenue: number
+    orders: number
+    customers: number
   }[]
+  monthly: {
+    month: string
+    revenue: number
+    orders: number
+    customers: number
+  }[]
+  yearly: {
+    year: string
+    revenue: number
+    orders: number
+    customers: number
+  }[]
+  popularDishes: {
+    name: string
+    category: string
+    orders: number
+    quantity: number
+  }[]
+  paymentMethods: {
+    method: string
+    count: number
+    amount: number
+  }[]
+  summary: {
+    totalRevenue: number
+    totalOrders: number
+    averageOrderValue: number
+    totalCustomers: number
+    creditAmount: number
+  }
 }
 
-interface ReportSummary {
-  totalRevenue: number
-  totalOrders: number
-  averageOrderValue: number
-  totalCustomers: number
-  creditAmount: number
-  cashAmount: number
-  cardAmount: number
-  upiAmount: number
-}
+const COLORS = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6"]
 
 export default function ReportsPage() {
   const { user } = useAuth()
   const { toast } = useToast()
-  const [orders, setOrders] = useState<OrderReport[]>([])
-  const [loading, setLoading] = useState(true)
-  const [reportType, setReportType] = useState<"daily" | "monthly" | "yearly">("daily")
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7))
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString())
-  const [reportData, setReportData] = useState<{
-    orders: OrderReport[]
-    summary: ReportSummary
-    analytics: any
-  }>({
-    orders: [],
+  const [reportData, setReportData] = useState<ReportData>({
+    daily: [],
+    monthly: [],
+    yearly: [],
+    popularDishes: [],
+    paymentMethods: [],
     summary: {
       totalRevenue: 0,
       totalOrders: 0,
       averageOrderValue: 0,
       totalCustomers: 0,
       creditAmount: 0,
-      cashAmount: 0,
-      cardAmount: 0,
-      upiAmount: 0
     },
-    analytics: {}
   })
-  
+  const [loading, setLoading] = useState(true)
+  const [dateRange, setDateRange] = useState({
+    startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+    endDate: new Date().toISOString().split("T")[0],
+  })
   const supabase = createClient()
 
   useEffect(() => {
     if (hasPermission(user?.role || "", ["super_admin", "owner", "manager"])) {
-      generateReport()
+      fetchReportData()
     }
-  }, [user, reportType, selectedDate, selectedMonth, selectedYear])
+  }, [user, dateRange])
 
-  const generateReport = async () => {
-    setLoading(true)
+  const fetchReportData = async () => {
     try {
-      let startDate: string
-      let endDate: string
+      setLoading(true)
 
-      // Calculate date range based on report type
-      switch (reportType) {
-        case "daily":
-          startDate = `${selectedDate} 00:00:00`
-          endDate = `${selectedDate} 23:59:59`
-          break
-        case "monthly":
-          const monthStart = new Date(selectedMonth + "-01")
-          const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0)
-          startDate = `${monthStart.toISOString().split('T')[0]} 00:00:00`
-          endDate = `${monthEnd.toISOString().split('T')[0]} 23:59:59`
-          break
-        case "yearly":
-          startDate = `${selectedYear}-01-01 00:00:00`
-          endDate = `${selectedYear}-12-31 23:59:59`
-          break
-      }
-
-      const { data, error } = await supabase
+      // Fetch orders within date range
+      const { data: orders, error: ordersError } = await supabase
         .from("orders")
         .select(`
           *,
-          restaurant_tables(
-            table_number,
-            floors(floor_name)
-          ),
           order_items(
             quantity,
-            unit_price,
             total_price,
-            menu_items(
-              name,
-              sub_category,
-              categories(name)
-            )
+            menu_items(name, categories(name))
           )
         `)
-        .gte("created_at", startDate)
-        .lte("created_at", endDate)
-        .order("created_at", { ascending: false })
+        .gte("created_at", `${dateRange.startDate}T00:00:00`)
+        .lte("created_at", `${dateRange.endDate}T23:59:59`)
+        .order("created_at", { ascending: true })
 
-      if (error) throw error
+      if (ordersError) throw ordersError
 
-      // Transform data for better display
-      const transformedOrders = (data || []).map(order => ({
-        ...order,
-        table_number: order.restaurant_tables?.table_number || 0,
-        floor_name: order.restaurant_tables?.floors?.floor_name || 'Unknown'
-      }))
-
-      // Calculate summary
-      const summary = calculateSummary(transformedOrders)
-      
-      // Generate analytics data
-      const analytics = generateAnalytics(transformedOrders)
+      // Process daily data
+      const dailyData = processDaily(orders || [])
+      const monthlyData = processMonthly(orders || [])
+      const yearlyData = processYearly(orders || [])
+      const popularDishes = processPopularDishes(orders || [])
+      const paymentMethods = processPaymentMethods(orders || [])
+      const summary = processSummary(orders || [])
 
       setReportData({
-        orders: transformedOrders,
+        daily: dailyData,
+        monthly: monthlyData,
+        yearly: yearlyData,
+        popularDishes,
+        paymentMethods,
         summary,
-        analytics
       })
-
     } catch (error) {
-      console.error("Error generating report:", error)
+      console.error("Error fetching report data:", error)
       toast({
         title: "Error",
-        description: "Failed to generate report.",
+        description: "Failed to load report data.",
         variant: "destructive",
       })
     } finally {
@@ -182,26 +148,122 @@ export default function ReportsPage() {
     }
   }
 
-  const calculateSummary = (orders: OrderReport[]): ReportSummary => {
+  const processDaily = (orders: any[]) => {
+    const dailyMap = new Map()
+
+    orders.forEach((order) => {
+      const date = new Date(order.created_at).toISOString().split("T")[0]
+      if (!dailyMap.has(date)) {
+        dailyMap.set(date, { revenue: 0, orders: 0, customers: new Set() })
+      }
+      const day = dailyMap.get(date)
+      day.revenue += Number(order.total_amount)
+      day.orders += 1
+      day.customers.add(order.customer_name)
+    })
+
+    return Array.from(dailyMap.entries()).map(([date, data]) => ({
+      date,
+      revenue: data.revenue,
+      orders: data.orders,
+      customers: data.customers.size,
+    }))
+  }
+
+  const processMonthly = (orders: any[]) => {
+    const monthlyMap = new Map()
+
+    orders.forEach((order) => {
+      const month = new Date(order.created_at).toISOString().substring(0, 7)
+      if (!monthlyMap.has(month)) {
+        monthlyMap.set(month, { revenue: 0, orders: 0, customers: new Set() })
+      }
+      const monthData = monthlyMap.get(month)
+      monthData.revenue += Number(order.total_amount)
+      monthData.orders += 1
+      monthData.customers.add(order.customer_name)
+    })
+
+    return Array.from(monthlyMap.entries()).map(([month, data]) => ({
+      month,
+      revenue: data.revenue,
+      orders: data.orders,
+      customers: data.customers.size,
+    }))
+  }
+
+  const processYearly = (orders: any[]) => {
+    const yearlyMap = new Map()
+
+    orders.forEach((order) => {
+      const year = new Date(order.created_at).getFullYear().toString()
+      if (!yearlyMap.has(year)) {
+        yearlyMap.set(year, { revenue: 0, orders: 0, customers: new Set() })
+      }
+      const yearData = yearlyMap.get(year)
+      yearData.revenue += Number(order.total_amount)
+      yearData.orders += 1
+      yearData.customers.add(order.customer_name)
+    })
+
+    return Array.from(yearlyMap.entries()).map(([year, data]) => ({
+      year,
+      revenue: data.revenue,
+      orders: data.orders,
+      customers: data.customers.size,
+    }))
+  }
+
+  const processPopularDishes = (orders: any[]) => {
+    const dishMap = new Map()
+
+    orders.forEach((order) => {
+      order.order_items?.forEach((item: any) => {
+        const dishName = item.menu_items.name
+        const category = item.menu_items.categories.name
+        const key = `${dishName}-${category}`
+
+        if (!dishMap.has(key)) {
+          dishMap.set(key, { name: dishName, category, orders: 0, quantity: 0 })
+        }
+        const dish = dishMap.get(key)
+        dish.orders += 1
+        dish.quantity += item.quantity
+      })
+    })
+
+    return Array.from(dishMap.values())
+      .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, 10)
+  }
+
+  const processPaymentMethods = (orders: any[]) => {
+    const paymentMap = new Map()
+
+    orders.forEach((order) => {
+      const method = order.payment_method || "pending"
+      if (!paymentMap.has(method)) {
+        paymentMap.set(method, { count: 0, amount: 0 })
+      }
+      const payment = paymentMap.get(method)
+      payment.count += 1
+      payment.amount += Number(order.total_amount)
+    })
+
+    return Array.from(paymentMap.entries()).map(([method, data]) => ({
+      method: method.charAt(0).toUpperCase() + method.slice(1),
+      count: data.count,
+      amount: data.amount,
+    }))
+  }
+
+  const processSummary = (orders: any[]) => {
     const totalRevenue = orders.reduce((sum, order) => sum + Number(order.total_amount), 0)
     const totalOrders = orders.length
     const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
     const uniqueCustomers = new Set(orders.map((order) => order.customer_name))
-    
     const creditAmount = orders
-      .filter((order) => order.payment_method === "credit")
-      .reduce((sum, order) => sum + Number(order.total_amount), 0)
-    
-    const cashAmount = orders
-      .filter((order) => order.payment_method === "cash")
-      .reduce((sum, order) => sum + Number(order.total_amount), 0)
-    
-    const cardAmount = orders
-      .filter((order) => order.payment_method === "card")
-      .reduce((sum, order) => sum + Number(order.total_amount), 0)
-    
-    const upiAmount = orders
-      .filter((order) => order.payment_method === "upi")
+      .filter((order) => order.payment_status === "credit")
       .reduce((sum, order) => sum + Number(order.total_amount), 0)
 
     return {
@@ -210,128 +272,70 @@ export default function ReportsPage() {
       averageOrderValue,
       totalCustomers: uniqueCustomers.size,
       creditAmount,
-      cashAmount,
-      cardAmount,
-      upiAmount
     }
   }
 
-  const generateAnalytics = (orders: OrderReport[]) => {
-    // Revenue by day/hour based on report type
-    const revenueByTime = {}
-    const ordersByHour = {}
-    const paymentMethodData = [
-      { name: 'Cash', value: reportData.summary.cashAmount, color: '#10B981' },
-      { name: 'Card', value: reportData.summary.cardAmount, color: '#3B82F6' },
-      { name: 'UPI', value: reportData.summary.upiAmount, color: '#8B5CF6' },
-      { name: 'Credit', value: reportData.summary.creditAmount, color: '#EF4444' }
-    ]
-
-    // Popular items
-    const itemCounts = {}
-    orders.forEach(order => {
-      order.order_items.forEach(item => {
-        const itemName = item.menu_items.name
-        itemCounts[itemName] = (itemCounts[itemName] || 0) + item.quantity
-      })
-    })
-
-    const popularItems = Object.entries(itemCounts)
-      .sort(([,a], [,b]) => (b as number) - (a as number))
-      .slice(0, 10)
-      .map(([name, count]) => ({ name, count }))
-
-    // Hourly distribution
-    orders.forEach(order => {
-      const hour = new Date(order.created_at).getHours()
-      ordersByHour[hour] = (ordersByHour[hour] || 0) + 1
-    })
-
-    const hourlyData = Array.from({ length: 24 }, (_, hour) => ({
-      hour: `${hour}:00`,
-      orders: ordersByHour[hour] || 0
-    }))
-
-    return {
-      paymentMethodData,
-      popularItems,
-      hourlyData,
-      revenueByTime
-    }
-  }
-
-  const exportToExcel = () => {
-    const exportData = reportData.orders.map(order => ({
-      'Order Number': order.order_number,
-      'Date & Time': new Date(order.created_at).toLocaleString(),
-      'Customer Name': order.customer_name,
-      'Table': `${order.floor_name} - Table ${order.table_number}`,
-      'Guests': order.guest_count,
-      'Items': order.order_items.map(item => 
-        `${item.menu_items.name} (${item.quantity}x)`
-      ).join(', '),
-      'Subtotal': order.subtotal,
-      'Tax Amount': order.tax_amount,
-      'Total Amount': order.total_amount,
-      'Payment Method': order.payment_method || 'Not Set',
-      'Payment Status': order.payment_status
-    }))
-
-    const ws = XLSX.utils.json_to_sheet(exportData)
+  const exportToExcel = (data: any[], filename: string) => {
+    const ws = XLSX.utils.json_to_sheet(data)
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, "Orders Report")
-    
-    // Add summary sheet
-    const summaryData = [
-      ['Metric', 'Value'],
-      ['Total Revenue', `₹${reportData.summary.totalRevenue.toFixed(2)}`],
-      ['Total Orders', reportData.summary.totalOrders],
-      ['Average Order Value', `₹${reportData.summary.averageOrderValue.toFixed(2)}`],
-      ['Total Customers', reportData.summary.totalCustomers],
-      ['Cash Payments', `₹${reportData.summary.cashAmount.toFixed(2)}`],
-      ['Card Payments', `₹${reportData.summary.cardAmount.toFixed(2)}`],
-      ['UPI Payments', `₹${reportData.summary.upiAmount.toFixed(2)}`],
-      ['Credit Payments', `₹${reportData.summary.creditAmount.toFixed(2)}`]
-    ]
-    
-    const summaryWs = XLSX.utils.aoa_to_sheet(summaryData)
-    XLSX.utils.book_append_sheet(wb, summaryWs, "Summary")
-    
-    const fileName = `${reportType}-report-${reportType === 'daily' ? selectedDate : reportType === 'monthly' ? selectedMonth : selectedYear}.xlsx`
-    XLSX.writeFile(wb, fileName)
-    
-    toast({
-      title: "Report Exported",
-      description: "Report has been exported to Excel successfully.",
-    })
+    XLSX.utils.book_append_sheet(wb, ws, "Report")
+    XLSX.writeFile(wb, `${filename}.xlsx`)
   }
 
-  const getPaymentMethodColor = (method: string | null) => {
-    switch (method) {
-      case "cash":
-        return "bg-green-100 text-green-800 border-green-200"
-      case "card":
-        return "bg-blue-100 text-blue-800 border-blue-200"
-      case "upi":
-        return "bg-purple-100 text-purple-800 border-purple-200"
-      case "credit":
-        return "bg-red-100 text-red-800 border-red-200"
-      default:
-        return "bg-gray-100 text-gray-800 border-gray-200"
-    }
-  }
+  const exportToPDF = (reportType: string) => {
+    // Generate HTML content for PDF
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>${reportType} Report</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #000; padding-bottom: 10px; }
+            .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 20px 0; }
+            .summary-card { border: 1px solid #ddd; padding: 15px; border-radius: 5px; }
+            .table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+            .table th, .table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            .table th { background-color: #f5f5f5; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>Resort Restaurant - ${reportType} Report</h1>
+            <p>Period: ${dateRange.startDate} to ${dateRange.endDate}</p>
+          </div>
+          
+          <div class="summary">
+            <div class="summary-card">
+              <h3>Total Revenue</h3>
+              <p>₹${reportData.summary.totalRevenue.toFixed(2)}</p>
+            </div>
+            <div class="summary-card">
+              <h3>Total Orders</h3>
+              <p>${reportData.summary.totalOrders}</p>
+            </div>
+            <div class="summary-card">
+              <h3>Average Order Value</h3>
+              <p>₹${reportData.summary.averageOrderValue.toFixed(2)}</p>
+            </div>
+            <div class="summary-card">
+              <h3>Total Customers</h3>
+              <p>${reportData.summary.totalCustomers}</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `
 
-  const getPaymentStatusColor = (status: string) => {
-    switch (status) {
-      case "paid":
-        return "bg-green-100 text-green-800"
-      case "pending":
-        return "bg-yellow-100 text-yellow-800"
-      case "credit":
-        return "bg-red-100 text-red-800"
-      default:
-        return "bg-gray-100 text-gray-800"
-    }
+    const blob = new Blob([htmlContent], { type: "text/html" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `${reportType}-Report.html`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   }
 
   if (!hasPermission(user?.role || "", ["super_admin", "owner", "manager"])) {
@@ -345,336 +349,349 @@ export default function ReportsPage() {
     )
   }
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Reports & Analytics</h1>
-          <p className="text-gray-600 dark:text-gray-400">Comprehensive business insights and reporting</p>
+          <p className="text-gray-600 dark:text-gray-400">Comprehensive business analytics and reporting</p>
         </div>
-        <Button onClick={exportToExcel} disabled={loading || reportData.orders.length === 0}>
-          <Download className="mr-2 h-4 w-4" />
-          Export to Excel
-        </Button>
       </div>
 
-      {/* Report Controls */}
+      {/* Date Range Filter */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center">
             <Calendar className="mr-2 h-5 w-5" />
-            Report Configuration
+            Report Period
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label>Report Type</Label>
-              <Select value={reportType} onValueChange={(value: "daily" | "monthly" | "yearly") => setReportType(value)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="daily">Daily Report</SelectItem>
-                  <SelectItem value="monthly">Monthly Report</SelectItem>
-                  <SelectItem value="yearly">Yearly Report</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label htmlFor="start-date">Start Date</Label>
+              <Input
+                id="start-date"
+                type="date"
+                value={dateRange.startDate}
+                onChange={(e) => setDateRange((prev) => ({ ...prev, startDate: e.target.value }))}
+              />
             </div>
-
-            {reportType === "daily" && (
-              <div className="space-y-2">
-                <Label>Date</Label>
-                <Input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                />
-              </div>
-            )}
-
-            {reportType === "monthly" && (
-              <div className="space-y-2">
-                <Label>Month</Label>
-                <Input
-                  type="month"
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(e.target.value)}
-                />
-              </div>
-            )}
-
-            {reportType === "yearly" && (
-              <div className="space-y-2">
-                <Label>Year</Label>
-                <Select value={selectedYear} onValueChange={setSelectedYear}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(year => (
-                      <SelectItem key={year} value={year.toString()}>
-                        {year}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
+            <div className="space-y-2">
+              <Label htmlFor="end-date">End Date</Label>
+              <Input
+                id="end-date"
+                type="date"
+                value={dateRange.endDate}
+                onChange={(e) => setDateRange((prev) => ({ ...prev, endDate: e.target.value }))}
+              />
+            </div>
             <div className="flex items-end">
-              <Button onClick={generateReport} disabled={loading}>
-                {loading ? "Generating..." : "Generate Report"}
-              </Button>
+              <Button onClick={fetchReportData}>Update Report</Button>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="tabular" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="tabular">Tabular Reports</TabsTrigger>
-          <TabsTrigger value="analytics">Analytics & Charts</TabsTrigger>
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">₹{reportData.summary.totalRevenue.toFixed(2)}</div>
+            <p className="text-xs text-muted-foreground">For selected period</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
+            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{reportData.summary.totalOrders}</div>
+            <p className="text-xs text-muted-foreground">Orders processed</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Avg Order Value</CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">₹{reportData.summary.averageOrderValue.toFixed(2)}</div>
+            <p className="text-xs text-muted-foreground">Per order</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Customers</CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{reportData.summary.totalCustomers}</div>
+            <p className="text-xs text-muted-foreground">Unique customers</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Credit Amount</CardTitle>
+            <FileText className="h-4 w-4 text-orange-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600">₹{reportData.summary.creditAmount.toFixed(2)}</div>
+            <p className="text-xs text-muted-foreground">To be collected</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Reports Tabs */}
+      <Tabs defaultValue="daily" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="daily">Daily Reports</TabsTrigger>
+          <TabsTrigger value="popular">Popular Dishes</TabsTrigger>
+          <TabsTrigger value="payments">Payment Analysis</TabsTrigger>
+          <TabsTrigger value="trends">Revenue Trends</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="tabular" className="space-y-6">
-          {/* Summary Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-                <DollarSign className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">₹{reportData.summary.totalRevenue.toFixed(2)}</div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
-                <Receipt className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{reportData.summary.totalOrders}</div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Avg Order Value</CardTitle>
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">₹{reportData.summary.averageOrderValue.toFixed(2)}</div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Unique Customers</CardTitle>
-                <Users className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{reportData.summary.totalCustomers}</div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Payment Methods Summary */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Cash Payments</CardTitle>
-                <Banknote className="h-4 w-4 text-green-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-green-600">₹{reportData.summary.cashAmount.toFixed(2)}</div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Card Payments</CardTitle>
-                <CreditCard className="h-4 w-4 text-blue-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-blue-600">₹{reportData.summary.cardAmount.toFixed(2)}</div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">UPI Payments</CardTitle>
-                <Smartphone className="h-4 w-4 text-purple-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-purple-600">₹{reportData.summary.upiAmount.toFixed(2)}</div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Credit Payments</CardTitle>
-                <Building className="h-4 w-4 text-red-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-red-600">₹{reportData.summary.creditAmount.toFixed(2)}</div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Orders Table */}
+        <TabsContent value="daily" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Detailed Orders Report</CardTitle>
-              <CardDescription>
-                {reportType.charAt(0).toUpperCase() + reportType.slice(1)} report for {
-                  reportType === 'daily' ? selectedDate : 
-                  reportType === 'monthly' ? selectedMonth : 
-                  selectedYear
-                } - {reportData.orders.length} orders
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Daily Revenue Report</CardTitle>
+                  <CardDescription>Daily breakdown of revenue and orders</CardDescription>
+                </div>
+                <div className="flex space-x-2">
+                  <Button variant="outline" onClick={() => exportToExcel(reportData.daily, "Daily-Report")}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Excel
+                  </Button>
+                  <Button variant="outline" onClick={() => exportToPDF("Daily")}>
+                    <FileText className="mr-2 h-4 w-4" />
+                    PDF
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="h-80 mb-6">
+                <ChartContainer
+                  config={{
+                    revenue: {
+                      label: "Revenue",
+                      color: "hsl(var(--chart-1))",
+                    },
+                    orders: {
+                      label: "Orders",
+                      color: "hsl(var(--chart-2))",
+                    },
+                  }}
+                >
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={reportData.daily}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" />
+                      <YAxis />
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                      <Bar dataKey="revenue" fill="var(--color-revenue)" name="Revenue (₹)" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartContainer>
+              </div>
+
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Revenue</TableHead>
+                      <TableHead>Orders</TableHead>
+                      <TableHead>Customers</TableHead>
+                      <TableHead>Avg Order Value</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {reportData.daily.map((day) => (
+                      <TableRow key={day.date}>
+                        <TableCell>{new Date(day.date).toLocaleDateString()}</TableCell>
+                        <TableCell className="font-medium">₹{day.revenue.toFixed(2)}</TableCell>
+                        <TableCell>{day.orders}</TableCell>
+                        <TableCell>{day.customers}</TableCell>
+                        <TableCell>₹{day.orders > 0 ? (day.revenue / day.orders).toFixed(2) : "0.00"}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="popular" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Popular Dishes</CardTitle>
+                  <CardDescription>Most ordered dishes by quantity</CardDescription>
+                </div>
+                <Button variant="outline" onClick={() => exportToExcel(reportData.popularDishes, "Popular-Dishes")}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Export
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Date & Time</TableHead>
-                      <TableHead>Order #</TableHead>
-                      <TableHead>Customer</TableHead>
-                      <TableHead>Table</TableHead>
-                      <TableHead>Items</TableHead>
-                      <TableHead>Subtotal</TableHead>
-                      <TableHead>Tax</TableHead>
-                      <TableHead>Total</TableHead>
-                      <TableHead>Payment Method</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead>Rank</TableHead>
+                      <TableHead>Dish Name</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Total Orders</TableHead>
+                      <TableHead>Total Quantity</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {reportData.orders.map((order) => (
-                      <TableRow key={order.id}>
-                        <TableCell className="text-sm">
-                          {new Date(order.created_at).toLocaleString()}
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          {order.order_number}
-                        </TableCell>
+                    {reportData.popularDishes.map((dish, index) => (
+                      <TableRow key={`${dish.name}-${dish.category}`}>
                         <TableCell>
-                          <div>
-                            <div className="font-medium">{order.customer_name}</div>
-                            <div className="text-sm text-gray-500">{order.guest_count} guests</div>
-                          </div>
+                          <Badge variant={index < 3 ? "default" : "outline"}>#{index + 1}</Badge>
                         </TableCell>
-                        <TableCell>
-                          {order.floor_name} - Table {order.table_number}
-                        </TableCell>
-                        <TableCell>
-                          <div className="max-w-xs">
-                            {order.order_items.map((item, idx) => (
-                              <div key={idx} className="text-sm">
-                                {item.menu_items.name} ({item.quantity}x)
-                              </div>
-                            ))}
-                          </div>
-                        </TableCell>
-                        <TableCell>₹{order.subtotal.toFixed(2)}</TableCell>
-                        <TableCell>₹{order.tax_amount.toFixed(2)}</TableCell>
-                        <TableCell className="font-medium">
-                          ₹{order.total_amount.toFixed(2)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge className={getPaymentMethodColor(order.payment_method)}>
-                            {order.payment_method ? order.payment_method.toUpperCase() : 'NOT SET'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge className={getPaymentStatusColor(order.payment_status)}>
-                            {order.payment_status.toUpperCase()}
-                          </Badge>
-                        </TableCell>
+                        <TableCell className="font-medium">{dish.name}</TableCell>
+                        <TableCell>{dish.category}</TableCell>
+                        <TableCell>{dish.orders}</TableCell>
+                        <TableCell className="font-medium">{dish.quantity}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </div>
-
-              {reportData.orders.length === 0 && !loading && (
-                <div className="text-center py-8">
-                  <BarChart3 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500">No orders found for the selected period.</p>
-                </div>
-              )}
             </CardContent>
           </Card>
         </TabsContent>
 
-        <TabsContent value="analytics" className="space-y-6">
-          {/* Payment Methods Chart */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Payment Methods Distribution</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={reportData.analytics.paymentMethodData?.filter(item => item.value > 0) || []}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {reportData.analytics.paymentMethodData?.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value) => [`₹${Number(value).toFixed(2)}`, 'Amount']} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Orders by Hour</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={reportData.analytics.hourlyData || []}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="hour" />
-                    <YAxis />
-                    <Tooltip />
-                    <Bar dataKey="orders" fill="#3B82F6" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Popular Items */}
+        <TabsContent value="payments" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Popular Menu Items</CardTitle>
-              <CardDescription>Most ordered items in the selected period</CardDescription>
+              <CardTitle>Payment Method Analysis</CardTitle>
+              <CardDescription>Breakdown of payment methods used</CardDescription>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={400}>
-                <BarChart data={reportData.analytics.popularItems || []} layout="horizontal">
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis type="number" />
-                  <YAxis dataKey="name" type="category" width={150} />
-                  <Tooltip />
-                  <Bar dataKey="count" fill="#10B981" />
-                </BarChart>
-              </ResponsiveContainer>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="h-80">
+                  <ChartContainer
+                    config={{
+                      count: {
+                        label: "Count",
+                        color: "hsl(var(--chart-1))",
+                      },
+                    }}
+                  >
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={reportData.paymentMethods}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={({ method, count }) => `${method}: ${count}`}
+                          outerRadius={80}
+                          fill="#8884d8"
+                          dataKey="count"
+                        >
+                          {reportData.paymentMethods.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <ChartTooltip content={<ChartTooltipContent />} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </ChartContainer>
+                </div>
+
+                <div className="space-y-4">
+                  {reportData.paymentMethods.map((payment, index) => (
+                    <div key={payment.method} className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="flex items-center space-x-3">
+                        <div
+                          className="w-4 h-4 rounded-full"
+                          style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                        />
+                        <span className="font-medium">{payment.method}</span>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-medium">₹{payment.amount.toFixed(2)}</div>
+                        <div className="text-sm text-gray-500">{payment.count} orders</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="trends" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Revenue Trends</CardTitle>
+              <CardDescription>Revenue and order trends over time</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="h-80">
+                <ChartContainer
+                  config={{
+                    revenue: {
+                      label: "Revenue",
+                      color: "hsl(var(--chart-1))",
+                    },
+                    orders: {
+                      label: "Orders",
+                      color: "hsl(var(--chart-2))",
+                    },
+                  }}
+                >
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={reportData.daily}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" />
+                      <YAxis />
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                      <Line
+                        type="monotone"
+                        dataKey="revenue"
+                        stroke="var(--color-revenue)"
+                        strokeWidth={2}
+                        name="Revenue (₹)"
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="orders"
+                        stroke="var(--color-orders)"
+                        strokeWidth={2}
+                        name="Orders"
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </ChartContainer>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

@@ -1,5 +1,7 @@
 "use client"
 
+import type React from "react"
+
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase"
 import { useAuth, hasPermission } from "@/lib/auth"
@@ -7,9 +9,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
-import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
@@ -21,7 +23,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { useToast } from "@/hooks/use-toast"
-import { Plus, Edit, Trash2, Search, UtensilsCrossed, Package, AlertTriangle } from "lucide-react"
+import { Plus, Edit, Trash2, Search, Utensils, Leaf, Beef, Package } from "lucide-react"
 
 interface Category {
   id: string
@@ -35,27 +37,22 @@ interface MenuItem {
   id: string
   name: string
   category_id: string
-  sub_category: string
+  sub_category: "veg" | "non_veg"
   price: number
   description: string
-  image_url: string | null
+  image_url?: string
   is_available: boolean
-  created_at: string
-  categories: {
-    name: string
-  }
-  inventory: {
-    id: string
-    total_quantity: number
+  categories?: Category
+  inventory?: {
     current_stock: number
     low_stock_threshold: number
-  }[]
+  }
 }
 
 interface MenuFormData {
   name: string
   category_id: string
-  sub_category: string
+  sub_category: "veg" | "non_veg"
   price: number
   description: string
   image_url: string
@@ -65,12 +62,11 @@ interface MenuFormData {
 export default function MenuPage() {
   const { user } = useAuth()
   const { toast } = useToast()
-  const [menuItems, setMenuItems] = useState<MenuItem[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [categoryFilter, setCategoryFilter] = useState("all")
-  const [stockFilter, setStockFilter] = useState("all")
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null)
   const [formData, setFormData] = useState<MenuFormData>({
@@ -93,32 +89,24 @@ export default function MenuPage() {
   const fetchData = async () => {
     try {
       // Fetch categories
-      const { data: categoriesTotal, error: categoriesError } = await supabase
+      const { data: categoriesData } = await supabase
         .from("categories")
         .select("*")
         .eq("is_active", true)
         .order("display_order")
 
-      if (categoriesError) throw categoriesError
-      setCategories(categoriesTotal || [])
-
-      // Fetch menu items with inventory data
-      const { data: menuData, error: menuError } = await supabase
+      // Fetch menu items with categories and inventory
+      const { data: menuItemsData } = await supabase
         .from("menu_items")
         .select(`
           *,
-          categories(name),
-          inventory(
-            id,
-            total_quantity,
-            current_stock,
-            low_stock_threshold
-          )
+          categories(*),
+          inventory(current_stock, low_stock_threshold)
         `)
         .order("name")
 
-      if (menuError) throw menuError
-      setMenuItems(menuData || [])
+      if (categoriesData) setCategories(categoriesData)
+      if (menuItemsData) setMenuItems(menuItemsData)
     } catch (error) {
       console.error("Error fetching data:", error)
       toast({
@@ -136,19 +124,8 @@ export default function MenuPage() {
 
     try {
       if (editingItem) {
-        // Update existing menu item
-        const { error } = await supabase
-          .from("menu_items")
-          .update({
-            name: formData.name,
-            category_id: formData.category_id,
-            sub_category: formData.sub_category,
-            price: formData.price,
-            description: formData.description,
-            image_url: formData.image_url || null,
-            is_available: formData.is_available,
-          })
-          .eq("id", editingItem.id)
+        // Update existing item
+        const { error } = await supabase.from("menu_items").update(formData).eq("id", editingItem.id)
 
         if (error) throw error
 
@@ -157,43 +134,22 @@ export default function MenuPage() {
           description: "Menu item has been updated successfully.",
         })
       } else {
-        // Create new menu item
-        const { data: newMenuItem, error } = await supabase
-          .from("menu_items")
-          .insert({
-            name: formData.name,
-            category_id: formData.category_id,
-            sub_category: formData.sub_category,
-            price: formData.price,
-            description: formData.description,
-            image_url: formData.image_url || null,
-            is_available: formData.is_available,
-          })
-          .select()
-          .single()
+        // Create new item
+        const { data: newItem, error } = await supabase.from("menu_items").insert(formData).select().single()
 
         if (error) throw error
 
-        // Create corresponding inventory entry
-        if (newMenuItem) {
-          const { error: inventoryError } = await supabase
-            .from("inventory")
-            .insert({
-              menu_item_id: newMenuItem.id,
-              total_quantity: 0,
-              current_stock: 0,
-              low_stock_threshold: 10,
-            })
-
-          if (inventoryError) {
-            console.error("Error creating inventory entry:", inventoryError)
-            // Don't throw error, just log it
-          }
-        }
+        // Create inventory entry for new item
+        await supabase.from("inventory").insert({
+          menu_item_id: newItem.id,
+          total_quantity: 0,
+          current_stock: 0,
+          low_stock_threshold: 10,
+        })
 
         toast({
           title: "Menu Item Created",
-          description: "New menu item has been created successfully with inventory tracking.",
+          description: "New menu item has been created successfully.",
         })
       }
 
@@ -225,14 +181,10 @@ export default function MenuPage() {
     setDialogOpen(true)
   }
 
-  const handleDelete = async (itemId: string, itemName: string) => {
-    if (!confirm(`Are you sure you want to delete "${itemName}"?`)) return
+  const handleDelete = async (itemId: string) => {
+    if (!confirm("Are you sure you want to delete this menu item?")) return
 
     try {
-      // Delete inventory entry first
-      await supabase.from("inventory").delete().eq("menu_item_id", itemId)
-      
-      // Then delete menu item
       const { error } = await supabase.from("menu_items").delete().eq("id", itemId)
 
       if (error) throw error
@@ -255,10 +207,7 @@ export default function MenuPage() {
 
   const toggleAvailability = async (itemId: string, isAvailable: boolean) => {
     try {
-      const { error } = await supabase
-        .from("menu_items")
-        .update({ is_available: isAvailable })
-        .eq("id", itemId)
+      const { error } = await supabase.from("menu_items").update({ is_available: isAvailable }).eq("id", itemId)
 
       if (error) throw error
 
@@ -278,44 +227,10 @@ export default function MenuPage() {
     }
   }
 
-  const getStockInfo = (item: MenuItem) => {
-    if (!item.inventory || item.inventory.length === 0) {
-      return {
-        stock: 0,
-        status: "No Stock Data",
-        color: "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-100"
-      }
-    }
-
-    const inventory = item.inventory[0]
-    const stock = inventory.current_stock
-    const threshold = inventory.low_stock_threshold
-
-    if (stock === 0) {
-      return {
-        stock,
-        status: "Out of Stock",
-        color: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100"
-      }
-    } else if (stock <= threshold) {
-      return {
-        stock,
-        status: "Low Stock",
-        color: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100"
-      }
-    } else {
-      return {
-        stock,
-        status: "In Stock",
-        color: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100"
-      }
-    }
-  }
-
   const resetForm = () => {
     setFormData({
       name: "",
-      category_id: categories.length > 0 ? categories[0].id : "",
+      category_id: "",
       sub_category: "veg",
       price: 0,
       description: "",
@@ -327,26 +242,8 @@ export default function MenuPage() {
   const filteredItems = menuItems.filter((item) => {
     const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesCategory = categoryFilter === "all" || item.category_id === categoryFilter
-    
-    let matchesStock = true
-    if (stockFilter !== "all") {
-      const stockInfo = getStockInfo(item)
-      if (stockFilter === "out" && stockInfo.stock > 0) matchesStock = false
-      if (stockFilter === "low" && (stockInfo.stock === 0 || stockInfo.stock > (item.inventory[0]?.low_stock_threshold || 0))) matchesStock = false
-      if (stockFilter === "in" && stockInfo.stock <= (item.inventory[0]?.low_stock_threshold || 0)) matchesStock = false
-    }
-    
-    return matchesSearch && matchesCategory && matchesStock
+    return matchesSearch && matchesCategory
   })
-
-  // Calculate stock statistics
-  const stockStats = menuItems.reduce((acc, item) => {
-    const stockInfo = getStockInfo(item)
-    if (stockInfo.stock === 0) acc.outOfStock++
-    else if (stockInfo.stock <= (item.inventory[0]?.low_stock_threshold || 0)) acc.lowStock++
-    else acc.inStock++
-    return acc
-  }, { outOfStock: 0, lowStock: 0, inStock: 0 })
 
   if (!hasPermission(user?.role || "", ["super_admin", "owner", "manager"])) {
     return (
@@ -372,7 +269,7 @@ export default function MenuPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Menu Management</h1>
-          <p className="text-gray-600 dark:text-gray-400">Manage restaurant menu items with real-time inventory tracking</p>
+          <p className="text-gray-600 dark:text-gray-400">Manage restaurant menu items and categories</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
@@ -390,7 +287,7 @@ export default function MenuPage() {
             <DialogHeader>
               <DialogTitle>{editingItem ? "Edit Menu Item" : "Add New Menu Item"}</DialogTitle>
               <DialogDescription>
-                {editingItem ? "Update the menu item details." : "Create a new menu item. Inventory tracking will be set up automatically."}
+                {editingItem ? "Update the menu item details." : "Create a new menu item for your restaurant."}
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -427,7 +324,9 @@ export default function MenuPage() {
                 <Label htmlFor="sub_category">Type</Label>
                 <Select
                   value={formData.sub_category}
-                  onValueChange={(value) => setFormData((prev) => ({ ...prev, sub_category: value }))}
+                  onValueChange={(value: "veg" | "non_veg") =>
+                    setFormData((prev) => ({ ...prev, sub_category: value }))
+                  }
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -458,6 +357,7 @@ export default function MenuPage() {
                   id="description"
                   value={formData.description}
                   onChange={(e) => setFormData((prev) => ({ ...prev, description: e.target.value }))}
+                  rows={3}
                 />
               </div>
 
@@ -477,56 +377,18 @@ export default function MenuPage() {
                   checked={formData.is_available}
                   onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, is_available: checked }))}
                 />
-                <Label htmlFor="is_available">Available</Label>
+                <Label htmlFor="is_available">Available for ordering</Label>
               </div>
 
               <div className="flex justify-end space-x-2">
                 <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit">
-                  {editingItem ? "Update Item" : "Create Item"}
-                </Button>
+                <Button type="submit">{editingItem ? "Update Item" : "Create Item"}</Button>
               </div>
             </form>
           </DialogContent>
         </Dialog>
-      </div>
-
-      {/* Stock Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">In Stock</CardTitle>
-            <Package className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">{stockStats.inStock}</div>
-            <p className="text-xs text-muted-foreground">Items available</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Low Stock</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-orange-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-orange-600">{stockStats.lowStock}</div>
-            <p className="text-xs text-muted-foreground">Items running low</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Out of Stock</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-red-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-red-600">{stockStats.outOfStock}</div>
-            <p className="text-xs text-muted-foreground">Items unavailable</p>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Filters */}
@@ -535,14 +397,14 @@ export default function MenuPage() {
           <CardTitle>Filters</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="search">Search Menu Items</Label>
+              <Label htmlFor="search">Search Items</Label>
               <div className="relative">
                 <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                 <Input
                   id="search"
-                  placeholder="Search items..."
+                  placeholder="Search menu items..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
@@ -551,7 +413,7 @@ export default function MenuPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="category">Category</Label>
+              <Label htmlFor="category-filter">Category</Label>
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                 <SelectTrigger>
                   <SelectValue placeholder="All categories" />
@@ -566,21 +428,6 @@ export default function MenuPage() {
                 </SelectContent>
               </Select>
             </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="stock">Stock Status</Label>
-              <Select value={stockFilter} onValueChange={setStockFilter}>
-                <SelectTrigger>
-                  <SelectValue placeholder="All items" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Items</SelectItem>
-                  <SelectItem value="in">In Stock</SelectItem>
-                  <SelectItem value="low">Low Stock</SelectItem>
-                  <SelectItem value="out">Out of Stock</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
           </div>
         </CardContent>
       </Card>
@@ -589,7 +436,7 @@ export default function MenuPage() {
       <Card>
         <CardHeader>
           <CardTitle>Menu Items ({filteredItems.length})</CardTitle>
-          <CardDescription>Manage menu items with live inventory tracking</CardDescription>
+          <CardDescription>Manage your restaurant's menu items</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
@@ -600,87 +447,74 @@ export default function MenuPage() {
                   <TableHead>Category</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Price</TableHead>
-                  <TableHead>Stock Status</TableHead>
-                  <TableHead>Current Stock</TableHead>
-                  <TableHead>Available</TableHead>
+                  <TableHead>Stock</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredItems.map((item) => {
-                  const stockInfo = getStockInfo(item)
-                  return (
-                    <TableRow key={item.id}>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">{item.name}</div>
-                          {item.description && (
-                            <div className="text-sm text-gray-500 truncate max-w-xs">
-                              {item.description}
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>{item.categories.name}</TableCell>
-                      <TableCell>
-                        <Badge 
-                          variant="outline"
-                          className={
-                            item.sub_category === 'veg' 
-                              ? 'bg-green-50 text-green-700' 
-                              : 'bg-red-50 text-red-700'
-                          }
-                        >
-                          {item.sub_category === 'veg' ? 'VEG' : 'NON-VEG'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="font-medium">₹{item.price.toFixed(2)}</TableCell>
-                      <TableCell>
-                        <Badge className={stockInfo.color}>
-                          {stockInfo.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="font-medium">
-                          {stockInfo.stock}
-                          {item.inventory && item.inventory.length > 0 && (
-                            <span className="text-sm text-gray-500 ml-1">
-                              (Alert at {item.inventory[0].low_stock_threshold})
-                            </span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
+                {filteredItems.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell>
+                      <div>
+                        <div className="font-medium">{item.name}</div>
+                        <div className="text-sm text-gray-500">{item.description}</div>
+                      </div>
+                    </TableCell>
+                    <TableCell>{item.categories?.name}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center space-x-1">
+                        {item.sub_category === "veg" ? (
+                          <Leaf className="h-4 w-4 text-green-600" />
+                        ) : (
+                          <Beef className="h-4 w-4 text-red-600" />
+                        )}
+                        <span className="capitalize">{item.sub_category.replace("_", " ")}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="font-medium">₹{item.price.toFixed(2)}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center space-x-1">
+                        <Package className="h-4 w-4 text-gray-400" />
+                        <span>{item.inventory?.current_stock || 0}</span>
+                        {(item.inventory?.current_stock || 0) <= (item.inventory?.low_stock_threshold || 10) && (
+                          <Badge variant="destructive" className="text-xs">
+                            Low
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center space-x-2">
                         <Switch
                           checked={item.is_available}
                           onCheckedChange={(checked) => toggleAvailability(item.id, checked)}
                         />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center space-x-2">
-                          <Button size="sm" variant="outline" onClick={() => handleEdit(item)}>
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => handleDelete(item.id, item.name)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
+                        <Badge variant={item.is_available ? "default" : "secondary"}>
+                          {item.is_available ? "Available" : "Unavailable"}
+                        </Badge>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center space-x-2">
+                        <Button size="sm" variant="outline" onClick={() => handleEdit(item)}>
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button size="sm" variant="destructive" onClick={() => handleDelete(item.id)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           </div>
 
           {filteredItems.length === 0 && (
             <div className="text-center py-8">
-              <UtensilsCrossed className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-500">No menu items found matching your criteria.</p>
+              <Utensils className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-500">No menu items found.</p>
             </div>
           )}
         </CardContent>

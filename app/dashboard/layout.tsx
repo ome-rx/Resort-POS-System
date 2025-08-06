@@ -1,10 +1,12 @@
 "use client"
 
+import type React from "react"
+
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/lib/auth"
-import { Sidebar } from "@/components/layout/sidebar"
-import { TopBar } from "@/components/layout/top-bar"
+import Sidebar from "@/components/layout/sidebar"
+import TopBar from "@/components/layout/top-bar"
 
 export default function DashboardLayout({
   children,
@@ -23,22 +25,22 @@ export default function DashboardLayout({
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
       </div>
     )
   }
 
   if (!user) {
-    return null // Will redirect to login
+    return null
   }
 
   return (
-    <div className="flex h-screen bg-gray-100 dark:bg-gray-900">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="lg:pl-64">
         <TopBar />
-        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100 dark:bg-gray-900 p-6">
-          {children}
+        <main className="py-6">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">{children}</div>
         </main>
       </div>
     </div>

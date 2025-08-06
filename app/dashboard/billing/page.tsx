@@ -35,7 +35,6 @@ interface Order {
   payment_status: string
   created_at: string
   restaurant_tables: {
-    id: string
     table_number: number
     floors: {
       floor_name: string
@@ -56,11 +55,6 @@ interface Order {
   }[]
 }
 
-interface CreditPaymentData {
-  room_number: string
-  guest_name: string
-}
-
 export default function BillingPage() {
   const { user } = useAuth()
   const { toast } = useToast()
@@ -72,10 +66,6 @@ export default function BillingPage() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [paymentMethod, setPaymentMethod] = useState<string>("")
   const [upiQRCode, setUpiQRCode] = useState<string>("")
-  const [creditPaymentData, setCreditPaymentData] = useState<CreditPaymentData>({
-    room_number: "",
-    guest_name: ""
-  })
   const supabase = createClient()
 
   useEffect(() => {
@@ -91,7 +81,6 @@ export default function BillingPage() {
         .select(`
           *,
           restaurant_tables(
-            id,
             table_number,
             floors(floor_name)
           ),
@@ -152,38 +141,14 @@ export default function BillingPage() {
   const handlePayment = async () => {
     if (!selectedOrder || !paymentMethod) return
 
-    // Validate credit payment data
-    if (paymentMethod === "credit") {
-      if (!creditPaymentData.room_number.trim() || !creditPaymentData.guest_name.trim()) {
-        toast({
-          title: "Missing Information",
-          description: "Please provide both room number and guest name for credit payment.",
-          variant: "destructive",
-        })
-        return
-      }
-    }
-
     try {
-      const updateData: any = {
-        payment_method: paymentMethod,
-        payment_status: paymentMethod === "credit" ? "credit" : "paid",
-        status: "completed",
-      }
-
-      // Store credit payment details if applicable
-      if (paymentMethod === "credit") {
-        updateData.credit_details = JSON.stringify({
-          room_number: creditPaymentData.room_number,
-          guest_name: creditPaymentData.guest_name,
-          processed_by: user?.full_name,
-          processed_at: new Date().toISOString()
-        })
-      }
-
       const { error } = await supabase
         .from("orders")
-        .update(updateData)
+        .update({
+          payment_method: paymentMethod,
+          payment_status: paymentMethod === "credit" ? "credit" : "paid",
+          status: "completed",
+        })
         .eq("id", selectedOrder.id)
 
       if (error) throw error
@@ -196,16 +161,13 @@ export default function BillingPage() {
 
       toast({
         title: "Payment Processed",
-        description: paymentMethod === "credit" 
-          ? `Credit payment processed for Room ${creditPaymentData.room_number} - ${creditPaymentData.guest_name}`
-          : `Payment of ₹${selectedOrder.total_amount.toFixed(2)} has been processed.`,
+        description: `Payment of ₹${selectedOrder.total_amount.toFixed(2)} has been processed.`,
       })
 
       setPaymentDialog(false)
       setSelectedOrder(null)
       setPaymentMethod("")
       setUpiQRCode("")
-      setCreditPaymentData({ room_number: "", guest_name: "" })
       fetchOrders()
     } catch (error) {
       console.error("Error processing payment:", error)
@@ -217,121 +179,96 @@ export default function BillingPage() {
     }
   }
 
-  const generateBill = async (order: Order) => {
-    try {
-      const billContent = `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Restaurant Bill - ${order.order_number}</title>
-    <style>
-        body { font-family: Arial, sans-serif; max-width: 400px; margin: 0 auto; padding: 20px; }
-        .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 15px; }
-        .order-info { margin-bottom: 15px; }
-        .items { width: 100%; border-collapse: collapse; margin: 15px 0; }
-        .items th, .items td { border-bottom: 1px solid #ddd; padding: 8px; text-align: left; }
-        .items th { background-color: #f5f5f5; }
-        .total-section { border-top: 2px solid #000; padding-top: 10px; margin-top: 15px; }
-        .footer { margin-top: 20px; text-align: center; font-size: 12px; }
-        .payment-info { background-color: #f9f9f9; padding: 10px; margin: 10px 0; }
-        @media print { body { margin: 0; } }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h2>RESORT RESTAURANT</h2>
-        <p>Bill Receipt</p>
-        <h3>Order #${order.order_number}</h3>
-    </div>
-    
-    <div class="order-info">
-        <strong>Date:</strong> ${new Date(order.created_at).toLocaleDateString()}<br>
-        <strong>Time:</strong> ${new Date(order.created_at).toLocaleTimeString()}<br>
-        <strong>Table:</strong> ${order.restaurant_tables.floors.floor_name} - Table ${order.restaurant_tables.table_number}<br>
-        <strong>Customer:</strong> ${order.customer_name}<br>
-        <strong>Guests:</strong> ${order.guest_count}<br>
-        <strong>Server:</strong> ${user?.full_name || 'N/A'}
-    </div>
-    
-    <table class="items">
-        <thead>
-            <tr>
+  const generateBill = (order: Order) => {
+    const billContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Bill - ${order.order_number}</title>
+          <style>
+            body { font-family: Arial, sans-serif; max-width: 400px; margin: 0 auto; padding: 20px; }
+            .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }
+            .restaurant-name { font-size: 24px; font-weight: bold; margin-bottom: 5px; }
+            .address { font-size: 12px; color: #666; }
+            .bill-details { margin: 20px 0; }
+            .bill-row { display: flex; justify-content: space-between; margin: 5px 0; }
+            .items-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+            .items-table th, .items-table td { border-bottom: 1px solid #ddd; padding: 8px; text-align: left; }
+            .items-table th { background-color: #f5f5f5; }
+            .total-section { border-top: 2px solid #000; padding-top: 10px; margin-top: 20px; }
+            .total-row { display: flex; justify-content: space-between; margin: 5px 0; }
+            .grand-total { font-weight: bold; font-size: 18px; border-top: 1px solid #000; padding-top: 5px; }
+            .footer { text-align: center; margin-top: 30px; font-size: 12px; color: #666; }
+            @media print { body { margin: 0; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="restaurant-name">RESORT RESTAURANT</div>
+            <div class="address">Goa, India<br>Phone: +91 832 123 4567</div>
+          </div>
+
+          <div class="bill-details">
+            <div class="bill-row"><span>Invoice No:</span><span>${order.order_number}</span></div>
+            <div class="bill-row"><span>Date:</span><span>${new Date(order.created_at).toLocaleDateString()}</span></div>
+            <div class="bill-row"><span>Time:</span><span>${new Date(order.created_at).toLocaleTimeString()}</span></div>
+            <div class="bill-row"><span>Table:</span><span>${order.restaurant_tables.floors.floor_name} - Table ${order.restaurant_tables.table_number}</span></div>
+            <div class="bill-row"><span>Customer:</span><span>${order.customer_name}</span></div>
+            <div class="bill-row"><span>Guests:</span><span>${order.guest_count}</span></div>
+          </div>
+
+          <table class="items-table">
+            <thead>
+              <tr>
                 <th>Item</th>
                 <th>Qty</th>
                 <th>Rate</th>
                 <th>Amount</th>
-            </tr>
-        </thead>
-        <tbody>
-            ${order.order_items.map(item => `
+              </tr>
+            </thead>
+            <tbody>
+              ${order.order_items
+                .map(
+                  (item) => `
                 <tr>
-                    <td>
-                        ${item.menu_items.name}
-                        ${item.modifiers ? `<br><small style="color: #666;">${item.modifiers}</small>` : ''}
-                    </td>
-                    <td>${item.quantity}</td>
-                    <td>₹${item.unit_price.toFixed(2)}</td>
-                    <td>₹${item.total_price.toFixed(2)}</td>
+                  <td>
+                    ${item.menu_items.name}
+                    ${item.modifiers ? `<br><small style="color: #666;">Note: ${item.modifiers}</small>` : ""}
+                  </td>
+                  <td>${item.quantity}</td>
+                  <td>₹${item.unit_price.toFixed(2)}</td>
+                  <td>₹${item.total_price.toFixed(2)}</td>
                 </tr>
-            `).join('')}
-        </tbody>
-    </table>
-    
-    <div class="total-section">
-        <div style="display: flex; justify-content: space-between;">
-            <strong>Subtotal:</strong>
-            <strong>₹${order.subtotal.toFixed(2)}</strong>
-        </div>
-        <div style="display: flex; justify-content: space-between;">
-            <strong>Tax:</strong>
-            <strong>₹${order.tax_amount.toFixed(2)}</strong>
-        </div>
-        <div style="display: flex; justify-content: space-between; font-size: 18px; margin-top: 10px;">
-            <strong>TOTAL:</strong>
-            <strong>₹${order.total_amount.toFixed(2)}</strong>
-        </div>
-    </div>
-    
-    ${order.payment_method ? `
-        <div class="payment-info">
-            <strong>Payment Method:</strong> ${order.payment_method.toUpperCase()}<br>
-            <strong>Payment Status:</strong> ${order.payment_status.toUpperCase()}
-            ${order.payment_method === 'credit' && order.credit_details ? `
-                <br><strong>Room Details:</strong> ${JSON.parse(order.credit_details).room_number} - ${JSON.parse(order.credit_details).guest_name}
-            ` : ''}
-        </div>
-    ` : ''}
-    
-    <div class="footer">
-        <p>Thank you for dining with us!</p>
-        <p>Visit us again soon</p>
-        <p style="margin-top: 15px; font-size: 10px;">Generated on ${new Date().toLocaleString()}</p>
-    </div>
-</body>
-</html>
-      `
+              `,
+                )
+                .join("")}
+            </tbody>
+          </table>
 
-      const printWindow = window.open('', '_blank')
-      if (printWindow) {
-        printWindow.document.write(billContent)
-        printWindow.document.close()
-        printWindow.focus()
-        printWindow.print()
-        printWindow.close()
-      }
+          <div class="total-section">
+            <div class="total-row"><span>Subtotal:</span><span>₹${order.subtotal.toFixed(2)}</span></div>
+            <div class="total-row"><span>SGST (2.5%):</span><span>₹${(order.tax_amount / 2).toFixed(2)}</span></div>
+            <div class="total-row"><span>CGST (2.5%):</span><span>₹${(order.tax_amount / 2).toFixed(2)}</span></div>
+            <div class="total-row grand-total"><span>Grand Total:</span><span>₹${order.total_amount.toFixed(2)}</span></div>
+          </div>
 
-      toast({
-        title: "Bill Generated",
-        description: "Bill has been generated and opened for printing.",
-      })
-    } catch (error) {
-      console.error("Error generating bill:", error)
-      toast({
-        title: "Error",
-        description: "Failed to generate bill.",
-        variant: "destructive",
-      })
-    }
+          <div class="footer">
+            <p>Thank you for dining with us!</p>
+            <p>Visit us again soon</p>
+          </div>
+        </body>
+      </html>
+    `
+
+    const blob = new Blob([billContent], { type: "text/html" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `Bill-${order.order_number}.html`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   }
 
   const getPaymentStatusColor = (status: string) => {
@@ -341,7 +278,7 @@ export default function BillingPage() {
       case "pending":
         return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-100"
       case "credit":
-        return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-100"
+        return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100"
       default:
         return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-100"
     }
@@ -420,6 +357,18 @@ export default function BillingPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            <div className="flex items-end">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setSearchTerm("")
+                  setStatusFilter("all")
+                }}
+              >
+                Clear Filters
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -427,7 +376,7 @@ export default function BillingPage() {
       {/* Orders Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Orders Ready for Payment ({filteredOrders.length})</CardTitle>
+          <CardTitle>Orders Ready for Billing ({filteredOrders.length})</CardTitle>
           <CardDescription>Process payments for completed orders</CardDescription>
         </CardHeader>
         <CardContent>
@@ -436,7 +385,8 @@ export default function BillingPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Order Details</TableHead>
-                  <TableHead>Customer & Table</TableHead>
+                  <TableHead>Customer</TableHead>
+                  <TableHead>Table</TableHead>
                   <TableHead>Amount</TableHead>
                   <TableHead>Payment Status</TableHead>
                   <TableHead>Time</TableHead>
@@ -447,22 +397,26 @@ export default function BillingPage() {
                 {filteredOrders.map((order) => (
                   <TableRow key={order.id}>
                     <TableCell>
-                      <div className="font-medium">{order.order_number}</div>
-                      <div className="text-sm text-gray-500">
-                        {order.order_items.length} items
+                      <div>
+                        <div className="font-medium">{order.order_number}</div>
+                        <div className="text-sm text-gray-500">{order.order_items.length} items</div>
                       </div>
                     </TableCell>
                     <TableCell>
                       <div>
                         <div className="font-medium">{order.customer_name}</div>
                         <div className="flex items-center text-sm text-gray-500">
-                          <MapPin className="h-3 w-3 mr-1" />
-                          {order.restaurant_tables.floors.floor_name} - Table {order.restaurant_tables.table_number}
-                        </div>
-                        <div className="flex items-center text-sm text-gray-500">
-                          <Users className="h-3 w-3 mr-1" />
+                          <Users className="mr-1 h-3 w-3" />
                           {order.guest_count} guests
                         </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center space-x-1">
+                        <MapPin className="h-4 w-4 text-gray-400" />
+                        <span>
+                          {order.restaurant_tables.floors.floor_name} - Table {order.restaurant_tables.table_number}
+                        </span>
                       </div>
                     </TableCell>
                     <TableCell>
@@ -477,8 +431,8 @@ export default function BillingPage() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center text-sm text-gray-500">
-                        <Clock className="h-3 w-3 mr-1" />
+                      <div className="flex items-center space-x-1 text-sm text-gray-500">
+                        <Clock className="h-3 w-3" />
                         <span>
                           {new Date(order.created_at).toLocaleTimeString([], {
                             hour: "2-digit",
@@ -504,7 +458,6 @@ export default function BillingPage() {
                                   setSelectedOrder(order)
                                   setPaymentMethod("")
                                   setUpiQRCode("")
-                                  setCreditPaymentData({ room_number: "", guest_name: "" })
                                 }}
                               >
                                 <CreditCard className="h-4 w-4 mr-1" />
@@ -539,35 +492,6 @@ export default function BillingPage() {
                                   </Select>
                                 </div>
 
-                                {paymentMethod === "credit" && (
-                                  <div className="space-y-4 p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-                                    <h4 className="font-medium text-purple-800 dark:text-purple-200">Credit Payment Details</h4>
-                                    <div className="space-y-2">
-                                      <Label htmlFor="room-number">Room Number</Label>
-                                      <Input
-                                        id="room-number"
-                                        placeholder="Enter room number"
-                                        value={creditPaymentData.room_number}
-                                        onChange={(e) => setCreditPaymentData(prev => ({ ...prev, room_number: e.target.value }))}
-                                        required
-                                      />
-                                    </div>
-                                    <div className="space-y-2">
-                                      <Label htmlFor="guest-name">Guest Name</Label>
-                                      <Input
-                                        id="guest-name"
-                                        placeholder="Enter guest name"
-                                        value={creditPaymentData.guest_name}
-                                        onChange={(e) => setCreditPaymentData(prev => ({ ...prev, guest_name: e.target.value }))}
-                                        required
-                                      />
-                                    </div>
-                                    <div className="text-sm text-purple-700 dark:text-purple-300">
-                                      This amount will be charged to the specified room.
-                                    </div>
-                                  </div>
-                                )}
-
                                 {paymentMethod === "upi" && (
                                   <div className="space-y-4">
                                     <Button
@@ -598,10 +522,7 @@ export default function BillingPage() {
                                   <Button variant="outline" onClick={() => setPaymentDialog(false)}>
                                     Cancel
                                   </Button>
-                                  <Button 
-                                    onClick={handlePayment} 
-                                    disabled={!paymentMethod || (paymentMethod === 'credit' && (!creditPaymentData.room_number.trim() || !creditPaymentData.guest_name.trim()))}
-                                  >
+                                  <Button onClick={handlePayment} disabled={!paymentMethod}>
                                     Process Payment
                                   </Button>
                                 </div>

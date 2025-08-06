@@ -1,147 +1,179 @@
 "use client"
 
+import { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { useAuth, hasPermission } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Separator } from "@/components/ui/separator"
-import { LayoutDashboard, Users, ShoppingCart, UtensilsCrossed, Receipt, BarChart3, Settings, QrCode, ChefHat, Table, Menu, ChevronLeft, ChevronRight } from 'lucide-react'
+import {
+  LayoutDashboard,
+  Users,
+  UtensilsCrossed,
+  Package,
+  Receipt,
+  BarChart3,
+  Settings,
+  ChefHat,
+  QrCode,
+  CreditCard,
+  Building,
+  Menu,
+  X,
+} from "lucide-react"
 
-interface NavItem {
-  title: string
-  href: string
-  icon: React.ComponentType<{ className?: string }>
-  roles: string[]
-}
-
-const navItems: NavItem[] = [
+const navigation = [
   {
-    title: "Dashboard",
+    name: "Dashboard",
     href: "/dashboard",
     icon: LayoutDashboard,
-    roles: ["super-admin", "owner", "manager", "waiter", "chef", "admin"],
+    roles: ["super_admin", "owner", "manager", "waiter", "chef"],
   },
   {
-    title: "Tables",
+    name: "Tables",
     href: "/dashboard/tables",
-    icon: Table,
-    roles: ["super-admin", "owner", "manager", "waiter", "admin"],
+    icon: Building,
+    roles: ["super_admin", "owner", "manager", "waiter", "busser"],
   },
   {
-    title: "Orders",
+    name: "Orders",
     href: "/dashboard/orders",
-    icon: ShoppingCart,
-    roles: ["super-admin", "owner", "manager", "waiter", "chef", "admin"],
+    icon: Receipt,
+    roles: ["super_admin", "owner", "manager", "waiter"],
   },
   {
-    title: "Kitchen",
-    href: "/dashboard/kitchen",
-    icon: ChefHat,
-    roles: ["super-admin", "owner", "manager", "chef", "admin"],
-  },
-  {
-    title: "Menu",
+    name: "Menu",
     href: "/dashboard/menu",
     icon: UtensilsCrossed,
-    roles: ["super-admin", "owner", "manager", "admin"],
+    roles: ["super_admin", "owner", "manager"],
   },
   {
-    title: "Inventory",
+    name: "Inventory",
     href: "/dashboard/inventory",
     icon: Package,
-    roles: ["super-admin", "owner", "manager", "admin"],
+    roles: ["super_admin", "owner", "manager"],
   },
   {
-    title: "Billing",
-    href: "/dashboard/billing",
-    icon: Receipt,
-    roles: ["super-admin", "owner", "manager", "waiter", "admin"],
+    name: "Kitchen Display",
+    href: "/dashboard/kitchen",
+    icon: ChefHat,
+    roles: ["super_admin", "owner", "manager", "chef"],
   },
   {
-    title: "QR Codes",
+    name: "QR Codes",
     href: "/dashboard/qr-codes",
     icon: QrCode,
-    roles: ["super-admin", "owner", "manager", "admin"],
+    roles: ["super_admin", "owner"],
   },
   {
-    title: "Reports",
+    name: "Billing",
+    href: "/dashboard/billing",
+    icon: CreditCard,
+    roles: ["super_admin", "owner", "manager"],
+  },
+  {
+    name: "Reports",
     href: "/dashboard/reports",
     icon: BarChart3,
-    roles: ["super-admin", "owner", "manager", "admin"],
+    roles: ["super_admin", "owner", "manager"],
   },
   {
-    title: "Users",
+    name: "Users",
     href: "/dashboard/users",
     icon: Users,
-    roles: ["super-admin", "owner", "admin"],
+    roles: ["super_admin", "owner"],
   },
   {
-    title: "Settings",
+    name: "Settings",
     href: "/dashboard/settings",
     icon: Settings,
-    roles: ["super-admin", "owner", "manager", "admin"],
+    roles: ["super_admin", "owner", "manager"],
   },
 ]
 
-export function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false)
+export default function Sidebar() {
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const pathname = usePathname()
   const { user } = useAuth()
 
-  const filteredNavItems = navItems.filter(item => 
-    user && item.roles.includes(user.role)
-  )
+  const filteredNavigation = navigation.filter((item) => user && hasPermission(user.role, item.roles))
 
   return (
-    <div className={cn(
-      "flex flex-col bg-card border-r transition-all duration-300",
-      collapsed ? "w-16" : "w-64"
-    )}>
-      <div className="flex items-center justify-between p-4">
-        {!collapsed && (
-          <h2 className="text-lg font-semibold">Resort POS</h2>
-        )}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setCollapsed(!collapsed)}
-          className="h-8 w-8 p-0"
-        >
-          {collapsed ? (
-            <ChevronRight className="h-4 w-4" />
-          ) : (
-            <ChevronLeft className="h-4 w-4" />
-          )}
-        </Button>
+    <>
+      {/* Mobile sidebar */}
+      <div className="lg:hidden">
+        <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Resort POS</h1>
+          <Button variant="ghost" size="sm" onClick={() => setSidebarOpen(true)}>
+            <Menu className="h-6 w-6" />
+          </Button>
+        </div>
       </div>
-      
-      <Separator />
-      
-      <ScrollArea className="flex-1 px-3">
-        <div className="space-y-2 py-4">
-          {filteredNavItems.map((item) => {
-            const Icon = item.icon
-            const isActive = pathname === item.href
-            
-            return (
-              <Link key={item.href} href={item.href}>
-                <Button
-                  variant={isActive ? "secondary" : "ghost"}
+
+      {/* Mobile sidebar overlay */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-75" onClick={() => setSidebarOpen(false)} />
+          <div className="fixed inset-y-0 left-0 flex w-full max-w-xs flex-col bg-white dark:bg-gray-800">
+            <div className="flex h-16 items-center justify-between px-4">
+              <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Resort POS</h1>
+              <Button variant="ghost" size="sm" onClick={() => setSidebarOpen(false)}>
+                <X className="h-6 w-6" />
+              </Button>
+            </div>
+            <nav className="flex-1 space-y-1 px-2 py-4">
+              {filteredNavigation.map((item) => {
+                const isActive = pathname === item.href
+                return (
+                  <Link
+                    key={item.name}
+                    href={item.href}
+                    className={cn(
+                      "group flex items-center px-2 py-2 text-sm font-medium rounded-md",
+                      isActive
+                        ? "bg-blue-100 text-blue-900 dark:bg-blue-900 dark:text-blue-100"
+                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white",
+                    )}
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    <item.icon className="mr-3 h-5 w-5" />
+                    {item.name}
+                  </Link>
+                )
+              })}
+            </nav>
+          </div>
+        </div>
+      )}
+
+      {/* Desktop sidebar */}
+      <div className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col">
+        <div className="flex flex-col flex-grow bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700">
+          <div className="flex items-center h-16 px-4 border-b border-gray-200 dark:border-gray-700">
+            <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Resort POS</h1>
+          </div>
+          <nav className="flex-1 space-y-1 px-2 py-4">
+            {filteredNavigation.map((item) => {
+              const isActive = pathname === item.href
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
                   className={cn(
-                    "w-full justify-start",
-                    collapsed && "px-2"
+                    "group flex items-center px-2 py-2 text-sm font-medium rounded-md",
+                    isActive
+                      ? "bg-blue-100 text-blue-900 dark:bg-blue-900 dark:text-blue-100"
+                      : "text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white",
                   )}
                 >
-                  <Icon className={cn("h-4 w-4", !collapsed && "mr-2")} />
-                  {!collapsed && item.title}
-                </Button>
-              </Link>
-            )
-          })}
+                  <item.icon className="mr-3 h-5 w-5" />
+                  {item.name}
+                </Link>
+              )
+            })}
+          </nav>
         </div>
-      </ScrollArea>
-    </div>
+      </div>
+    </>
   )
 }
