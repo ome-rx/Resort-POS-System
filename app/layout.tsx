@@ -1,15 +1,15 @@
-import type { Metadata } from 'next'
+import type { Metadata } from "next"
 import { Inter } from 'next/font/google'
-import './globals.css'
-import { ThemeProvider } from '@/components/theme-provider'
-import { AuthProvider } from '@/lib/auth'
-import { Toaster } from 'sonner'
+import "./globals.css"
+import { ThemeProvider } from "@/components/theme-provider"
+import { AuthProvider } from "@/lib/auth"
+import { Toaster } from "@/components/ui/sonner"
 
-const inter = Inter({ subsets: ['latin'] })
+const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: 'Resort POS System',
-  description: 'Complete Point of Sale system for resort management',
+  title: "Resort POS System",
+  description: "Complete Point of Sale system for resort restaurants",
     generator: 'v0.dev'
 }
 
@@ -29,7 +29,7 @@ export default function RootLayout({
         >
           <AuthProvider>
             {children}
-            <Toaster position="top-right" />
+            <Toaster />
           </AuthProvider>
         </ThemeProvider>
       </body>

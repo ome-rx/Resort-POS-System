@@ -1,9 +1,14 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = createSupabaseClient(supabaseUrl, supabaseAnonKey)
+
+// Named export for createClient
+export const createClient = () => {
+  return createSupabaseClient(supabaseUrl, supabaseAnonKey)
+}
 
 export type Database = {
   public: {
@@ -40,7 +45,7 @@ export type Database = {
       tables: {
         Row: {
           id: string
-          table_number: string
+          table_number: number
           capacity: number
           status: 'available' | 'occupied' | 'reserved' | 'maintenance'
           qr_code: string | null
@@ -49,7 +54,7 @@ export type Database = {
         }
         Insert: {
           id?: string
-          table_number: string
+          table_number: number
           capacity: number
           status?: 'available' | 'occupied' | 'reserved' | 'maintenance'
           qr_code?: string | null
@@ -58,48 +63,10 @@ export type Database = {
         }
         Update: {
           id?: string
-          table_number?: string
+          table_number?: number
           capacity?: number
           status?: 'available' | 'occupied' | 'reserved' | 'maintenance'
           qr_code?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-      }
-      orders: {
-        Row: {
-          id: string
-          table_id: string
-          customer_name: string | null
-          customer_phone: string | null
-          status: 'pending' | 'confirmed' | 'preparing' | 'ready' | 'served' | 'completed' | 'cancelled'
-          total_amount: number
-          payment_status: 'pending' | 'paid' | 'failed'
-          payment_method: 'cash' | 'card' | 'upi' | 'credit' | null
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          table_id: string
-          customer_name?: string | null
-          customer_phone?: string | null
-          status?: 'pending' | 'confirmed' | 'preparing' | 'ready' | 'served' | 'completed' | 'cancelled'
-          total_amount: number
-          payment_status?: 'pending' | 'paid' | 'failed'
-          payment_method?: 'cash' | 'card' | 'upi' | 'credit' | null
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          table_id?: string
-          customer_name?: string | null
-          customer_phone?: string | null
-          status?: 'pending' | 'confirmed' | 'preparing' | 'ready' | 'served' | 'completed' | 'cancelled'
-          total_amount?: number
-          payment_status?: 'pending' | 'paid' | 'failed'
-          payment_method?: 'cash' | 'card' | 'upi' | 'credit' | null
           created_at?: string
           updated_at?: string
         }

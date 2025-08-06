@@ -2,11 +2,13 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react'
 
+export type UserRole = 'super-admin' | 'owner' | 'manager' | 'waiter' | 'chef' | 'admin'
+
 export interface User {
   id: string
   username: string
   email: string
-  role: 'super-admin' | 'owner' | 'manager' | 'waiter' | 'chef' | 'admin'
+  role: UserRole
   full_name: string
 }
 
@@ -48,7 +50,7 @@ const DEMO_USERS: Record<string, { password: string; user: User }> = {
       username: 'manager',
       email: 'manager@resort.com',
       role: 'manager',
-      full_name: 'Resort Manager'
+      full_name: 'Restaurant Manager'
     }
   },
   'waiter': {
@@ -98,7 +100,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Check for stored user on mount
+    // Check for stored user session
     const storedUser = localStorage.getItem('resort-pos-user')
     if (storedUser) {
       try {
@@ -112,14 +114,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const signIn = async (username: string, password: string): Promise<boolean> => {
-    const userCredentials = DEMO_USERS[username]
+    setLoading(true)
     
-    if (userCredentials && userCredentials.password === password) {
-      setUser(userCredentials.user)
-      localStorage.setItem('resort-pos-user', JSON.stringify(userCredentials.user))
+    // Simulate API call delay
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    
+    // Check demo credentials
+    if (DEMO_USERS[username] && DEMO_PASSWORDS[username] === password) {
+      const user = DEMO_USERS[username]
+      setUser(user)
+      localStorage.setItem('resort-pos-user', JSON.stringify(user))
+      setLoading(false)
       return true
     }
     
+    setLoading(false)
     return false
   }
 
@@ -128,10 +137,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('resort-pos-user')
   }
 
-  return React.createElement(
-    AuthContext.Provider,
-    { value: { user, loading, signIn, signOut } },
-    children
+  return (
+    <AuthContext.Provider value={{ user, loading, signIn, signOut }}>
+      {children}
+    </AuthContext.Provider>
   )
 }
 
@@ -141,4 +150,8 @@ export const useAuth = () => {
     throw new Error('useAuth must be used within an AuthProvider')
   }
   return context
+}
+
+export function hasPermission(userRole: string, requiredRoles: string[]): boolean {
+  return requiredRoles.includes(userRole)
 }

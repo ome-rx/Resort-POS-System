@@ -1,72 +1,147 @@
-'use client'
+"use client"
 
-import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { cn } from '@/lib/utils'
-import { useAuth } from '@/lib/auth'
-import { LayoutDashboard, ShoppingCart, Users, ChefHat, Receipt, BarChart3, Settings, QrCode, Table, Package } from 'lucide-react'
+import Link from "next/link"
+import { usePathname } from "next/navigation"
+import { cn } from "@/lib/utils"
+import { useAuth, hasPermission } from "@/lib/auth"
+import { Button } from "@/components/ui/button"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Separator } from "@/components/ui/separator"
+import { LayoutDashboard, Users, ShoppingCart, UtensilsCrossed, Receipt, BarChart3, Settings, QrCode, ChefHat, Table, Menu, ChevronLeft, ChevronRight } from 'lucide-react'
 
-const navigation = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, roles: ['super-admin', 'owner', 'manager', 'admin'] },
-  { name: 'Tables', href: '/dashboard/tables', icon: Table, roles: ['super-admin', 'owner', 'manager', 'waiter', 'admin'] },
-  { name: 'Orders', href: '/dashboard/orders', icon: ShoppingCart, roles: ['super-admin', 'owner', 'manager', 'waiter', 'admin'] },
-  { name: 'Kitchen', href: '/dashboard/kitchen', icon: ChefHat, roles: ['super-admin', 'owner', 'manager', 'chef', 'admin'] },
-  { name: 'Menu', href: '/dashboard/menu', icon: Package, roles: ['super-admin', 'owner', 'manager', 'admin'] },
-  { name: 'Inventory', href: '/dashboard/inventory', icon: Package, roles: ['super-admin', 'owner', 'manager', 'admin'] },
-  { name: 'Billing', href: '/dashboard/billing', icon: Receipt, roles: ['super-admin', 'owner', 'manager', 'waiter', 'admin'] },
-  { name: 'QR Codes', href: '/dashboard/qr-codes', icon: QrCode, roles: ['super-admin', 'owner', 'manager', 'admin'] },
-  { name: 'Reports', href: '/dashboard/reports', icon: BarChart3, roles: ['super-admin', 'owner', 'manager', 'admin'] },
-  { name: 'Users', href: '/dashboard/users', icon: Users, roles: ['super-admin', 'owner', 'admin'] },
-  { name: 'Settings', href: '/dashboard/settings', icon: Settings, roles: ['super-admin', 'owner', 'manager', 'admin'] },
+interface NavItem {
+  title: string
+  href: string
+  icon: React.ComponentType<{ className?: string }>
+  roles: string[]
+}
+
+const navItems: NavItem[] = [
+  {
+    title: "Dashboard",
+    href: "/dashboard",
+    icon: LayoutDashboard,
+    roles: ["super-admin", "owner", "manager", "waiter", "chef", "admin"],
+  },
+  {
+    title: "Tables",
+    href: "/dashboard/tables",
+    icon: Table,
+    roles: ["super-admin", "owner", "manager", "waiter", "admin"],
+  },
+  {
+    title: "Orders",
+    href: "/dashboard/orders",
+    icon: ShoppingCart,
+    roles: ["super-admin", "owner", "manager", "waiter", "chef", "admin"],
+  },
+  {
+    title: "Kitchen",
+    href: "/dashboard/kitchen",
+    icon: ChefHat,
+    roles: ["super-admin", "owner", "manager", "chef", "admin"],
+  },
+  {
+    title: "Menu",
+    href: "/dashboard/menu",
+    icon: UtensilsCrossed,
+    roles: ["super-admin", "owner", "manager", "admin"],
+  },
+  {
+    title: "Inventory",
+    href: "/dashboard/inventory",
+    icon: Package,
+    roles: ["super-admin", "owner", "manager", "admin"],
+  },
+  {
+    title: "Billing",
+    href: "/dashboard/billing",
+    icon: Receipt,
+    roles: ["super-admin", "owner", "manager", "waiter", "admin"],
+  },
+  {
+    title: "QR Codes",
+    href: "/dashboard/qr-codes",
+    icon: QrCode,
+    roles: ["super-admin", "owner", "manager", "admin"],
+  },
+  {
+    title: "Reports",
+    href: "/dashboard/reports",
+    icon: BarChart3,
+    roles: ["super-admin", "owner", "manager", "admin"],
+  },
+  {
+    title: "Users",
+    href: "/dashboard/users",
+    icon: Users,
+    roles: ["super-admin", "owner", "admin"],
+  },
+  {
+    title: "Settings",
+    href: "/dashboard/settings",
+    icon: Settings,
+    roles: ["super-admin", "owner", "manager", "admin"],
+  },
 ]
 
 export function Sidebar() {
+  const [collapsed, setCollapsed] = useState(false)
   const pathname = usePathname()
   const { user } = useAuth()
 
-  const filteredNavigation = navigation.filter(item => 
+  const filteredNavItems = navItems.filter(item => 
     user && item.roles.includes(user.role)
   )
 
   return (
-    <div className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0">
-      <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700">
-        <div className="flex-1 flex flex-col pt-5 pb-4 overflow-y-auto">
-          <div className="flex items-center flex-shrink-0 px-4">
-            <h1 className="text-xl font-bold text-gray-900 dark:text-white">
-              Resort POS
-            </h1>
-          </div>
-          <nav className="mt-5 flex-1 px-2 space-y-1">
-            {filteredNavigation.map((item) => {
-              const isActive = pathname === item.href
-              return (
-                <Link
-                  key={item.name}
-                  href={item.href}
+    <div className={cn(
+      "flex flex-col bg-card border-r transition-all duration-300",
+      collapsed ? "w-16" : "w-64"
+    )}>
+      <div className="flex items-center justify-between p-4">
+        {!collapsed && (
+          <h2 className="text-lg font-semibold">Resort POS</h2>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setCollapsed(!collapsed)}
+          className="h-8 w-8 p-0"
+        >
+          {collapsed ? (
+            <ChevronRight className="h-4 w-4" />
+          ) : (
+            <ChevronLeft className="h-4 w-4" />
+          )}
+        </Button>
+      </div>
+      
+      <Separator />
+      
+      <ScrollArea className="flex-1 px-3">
+        <div className="space-y-2 py-4">
+          {filteredNavItems.map((item) => {
+            const Icon = item.icon
+            const isActive = pathname === item.href
+            
+            return (
+              <Link key={item.href} href={item.href}>
+                <Button
+                  variant={isActive ? "secondary" : "ghost"}
                   className={cn(
-                    isActive
-                      ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
-                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white',
-                    'group flex items-center px-2 py-2 text-sm font-medium rounded-md'
+                    "w-full justify-start",
+                    collapsed && "px-2"
                   )}
                 >
-                  <item.icon
-                    className={cn(
-                      isActive
-                        ? 'text-gray-500 dark:text-gray-300'
-                        : 'text-gray-400 dark:text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300',
-                      'mr-3 flex-shrink-0 h-6 w-6'
-                    )}
-                    aria-hidden="true"
-                  />
-                  {item.name}
-                </Link>
-              )
-            })}
-          </nav>
+                  <Icon className={cn("h-4 w-4", !collapsed && "mr-2")} />
+                  {!collapsed && item.title}
+                </Button>
+              </Link>
+            )
+          })}
         </div>
-      </div>
+      </ScrollArea>
     </div>
   )
 }

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
-import { CreditCard, Banknote, Smartphone, Building } from "lucide-react"
+import { CreditCard, Banknote, Smartphone, Building } from 'lucide-react'
 import { supabase } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
 import QRCode from "qrcode"
@@ -129,7 +129,7 @@ export function FreeTableModal({ isOpen, onClose, table, onSuccess }: FreeTableM
       if (orderError) throw orderError
 
       const { error: tableError } = await supabase
-        .from("tables")
+        .from("restaurant_tables")
         .update({ status: "available", current_order_id: null })
         .eq("id", table.id)
 
