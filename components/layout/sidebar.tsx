@@ -1,5 +1,7 @@
 "use client"
 
+import { useState } from "react"
+import { Package } from 'lucide-react'
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -21,67 +23,67 @@ const navItems: NavItem[] = [
     title: "Dashboard",
     href: "/dashboard",
     icon: LayoutDashboard,
-    roles: ["super-admin", "owner", "manager", "waiter", "chef", "admin"],
+    roles: ["super_admin", "owner", "manager", "waiter", "chef", "admin"],
   },
   {
     title: "Tables",
     href: "/dashboard/tables",
     icon: Table,
-    roles: ["super-admin", "owner", "manager", "waiter", "admin"],
+    roles: ["super_admin", "owner", "manager", "waiter", "admin"],
   },
   {
     title: "Orders",
     href: "/dashboard/orders",
     icon: ShoppingCart,
-    roles: ["super-admin", "owner", "manager", "waiter", "chef", "admin"],
+    roles: ["super_admin", "owner", "manager", "waiter", "chef", "admin"],
   },
   {
     title: "Kitchen",
     href: "/dashboard/kitchen",
     icon: ChefHat,
-    roles: ["super-admin", "owner", "manager", "chef", "admin"],
+    roles: ["super_admin", "owner", "manager", "chef", "admin"],
   },
   {
     title: "Menu",
     href: "/dashboard/menu",
     icon: UtensilsCrossed,
-    roles: ["super-admin", "owner", "manager", "admin"],
+    roles: ["super_admin", "owner", "manager", "admin"],
   },
   {
     title: "Inventory",
     href: "/dashboard/inventory",
     icon: Package,
-    roles: ["super-admin", "owner", "manager", "admin"],
+    roles: ["super_admin", "owner", "manager", "admin"],
   },
   {
     title: "Billing",
     href: "/dashboard/billing",
     icon: Receipt,
-    roles: ["super-admin", "owner", "manager", "waiter", "admin"],
+    roles: ["super_admin", "owner", "manager", "waiter", "admin"],
   },
   {
     title: "QR Codes",
     href: "/dashboard/qr-codes",
     icon: QrCode,
-    roles: ["super-admin", "owner", "manager", "admin"],
+    roles: ["super_admin", "owner", "manager", "admin"],
   },
   {
     title: "Reports",
     href: "/dashboard/reports",
     icon: BarChart3,
-    roles: ["super-admin", "owner", "manager", "admin"],
+    roles: ["super_admin", "owner", "manager", "admin"],
   },
   {
     title: "Users",
     href: "/dashboard/users",
     icon: Users,
-    roles: ["super-admin", "owner", "admin"],
+    roles: ["super_admin", "owner", "admin"],
   },
   {
     title: "Settings",
     href: "/dashboard/settings",
     icon: Settings,
-    roles: ["super-admin", "owner", "manager", "admin"],
+    roles: ["super_admin", "owner", "manager", "admin"],
   },
 ]
 
