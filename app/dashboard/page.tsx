@@ -1,59 +1,58 @@
-"use client"
+'use client'
 
-import { useEffect, useState } from "react"
-import { useAuth } from "@/lib/auth"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { DollarSign, ShoppingCart, Clock, TrendingUp, Users, ChefHat, Receipt, Package } from "lucide-react"
-import Link from "next/link"
-
-interface DashboardStats {
-  todayRevenue: number
-  averageOrderValue: number
-  pendingOrders: number
-  takeawayOrders: number
-  activeOrders: number
-  ongoingOrders: number
-  completedOrders: number
-  lowStockItems: number
-}
+import { useAuth } from '@/lib/auth'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Users, ShoppingCart, DollarSign, TrendingUp, Table, ChefHat, Clock, CheckCircle } from 'lucide-react'
 
 export default function DashboardPage() {
   const { user } = useAuth()
-  const [stats, setStats] = useState<DashboardStats>({
-    todayRevenue: 2450.75,
-    averageOrderValue: 485.15,
-    pendingOrders: 3,
-    takeawayOrders: 2,
-    activeOrders: 5,
-    ongoingOrders: 2,
-    completedOrders: 12,
-    lowStockItems: 4,
-  })
-  const [loading, setLoading] = useState(false)
 
-  useEffect(() => {
-    // For demo purposes, we'll use mock data
-    // In production, you would fetch real data from Supabase
-    setLoading(false)
-  }, [])
+  const stats = [
+    {
+      title: 'Total Tables',
+      value: '24',
+      description: '18 occupied, 6 available',
+      icon: Table,
+      color: 'text-blue-600'
+    },
+    {
+      title: 'Active Orders',
+      value: '42',
+      description: '12 pending, 30 in progress',
+      icon: ShoppingCart,
+      color: 'text-green-600'
+    },
+    {
+      title: 'Today\'s Revenue',
+      value: '₹45,230',
+      description: '+12% from yesterday',
+      icon: DollarSign,
+      color: 'text-yellow-600'
+    },
+    {
+      title: 'Kitchen Queue',
+      value: '8',
+      description: '3 preparing, 5 ready',
+      icon: ChefHat,
+      color: 'text-red-600'
+    }
+  ]
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
-      </div>
-    )
-  }
+  const recentOrders = [
+    { id: 'ORD-001', table: 'T-05', items: 3, amount: '₹1,250', status: 'preparing', time: '10:30 AM' },
+    { id: 'ORD-002', table: 'T-12', items: 2, amount: '₹850', status: 'ready', time: '10:25 AM' },
+    { id: 'ORD-003', table: 'T-08', items: 5, amount: '₹2,100', status: 'served', time: '10:20 AM' },
+    { id: 'ORD-004', table: 'T-03', items: 1, amount: '₹450', status: 'pending', time: '10:15 AM' },
+  ]
 
-  const getDashboardContent = () => {
-    switch (user?.role) {
-      case "chef":
-        return <ChefDashboard stats={stats} />
-      case "waiter":
-        return <WaiterDashboard stats={stats} />
-      default:
-        return <AdminDashboard stats={stats} />
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'pending': return 'bg-yellow-100 text-yellow-800'
+      case 'preparing': return 'bg-blue-100 text-blue-800'
+      case 'ready': return 'bg-green-100 text-green-800'
+      case 'served': return 'bg-gray-100 text-gray-800'
+      default: return 'bg-gray-100 text-gray-800'
     }
   }
 
@@ -61,279 +60,75 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-          <p className="text-gray-600 dark:text-gray-400">Welcome back, {user?.full_name}!</p>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+            Dashboard
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400">
+            Welcome back, {user?.full_name}! Here's what's happening at your resort today.
+          </p>
         </div>
-        <div className="flex space-x-2">
-          <Button asChild>
-            <Link href="/dashboard/orders/new">Create New Order</Link>
-          </Button>
-        </div>
+        <Badge variant="outline" className="text-sm">
+          Role: {user?.role}
+        </Badge>
       </div>
 
-      {getDashboardContent()}
-    </div>
-  )
-}
-
-function AdminDashboard({ stats }: { stats: DashboardStats }) {
-  return (
-    <>
-      {/* Key Metrics */}
+      {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Today's Revenue</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">₹{stats.todayRevenue.toFixed(2)}</div>
-            <p className="text-xs text-muted-foreground">Resets every 24 hours</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Average Order Value</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">₹{stats.averageOrderValue.toFixed(2)}</div>
-            <p className="text-xs text-muted-foreground">Per order today</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending Orders</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.pendingOrders}</div>
-            <p className="text-xs text-muted-foreground">Awaiting preparation</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Low Stock Items</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-orange-600">{stats.lowStockItems}</div>
-            <p className="text-xs text-muted-foreground">Need restocking</p>
-          </CardContent>
-        </Card>
+        {stats.map((stat, index) => (
+          <Card key={index}>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                {stat.title}
+              </CardTitle>
+              <stat.icon className={`h-4 w-4 ${stat.color}`} />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stat.value}</div>
+              <p className="text-xs text-muted-foreground">
+                {stat.description}
+              </p>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      {/* Real-time Order Tracking */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Clock className="mr-2 h-5 w-5 text-blue-600" />
-              Active Orders
-            </CardTitle>
-            <CardDescription>Orders pending preparation</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-blue-600">{stats.activeOrders}</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <ChefHat className="mr-2 h-5 w-5 text-orange-600" />
-              Ongoing Orders
-            </CardTitle>
-            <CardDescription>Currently being prepared</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-orange-600">{stats.ongoingOrders}</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Receipt className="mr-2 h-5 w-5 text-green-600" />
-              Completed Orders
-            </CardTitle>
-            <CardDescription>Ready for serving</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-green-600">{stats.completedOrders}</div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Quick Actions */}
+      {/* Recent Orders */}
       <Card>
         <CardHeader>
-          <CardTitle>Quick Actions</CardTitle>
-          <CardDescription>Common tasks and shortcuts</CardDescription>
+          <CardTitle>Recent Orders</CardTitle>
+          <CardDescription>
+            Latest orders from your restaurant
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Button asChild className="h-20 flex-col">
-              <Link href="/dashboard/orders/new">
-                <ShoppingCart className="h-6 w-6 mb-2" />
-                Create Order
-              </Link>
-            </Button>
-            <Button asChild variant="outline" className="h-20 flex-col bg-transparent">
-              <Link href="/dashboard/reports">
-                <TrendingUp className="h-6 w-6 mb-2" />
-                View Reports
-              </Link>
-            </Button>
-            <Button asChild variant="outline" className="h-20 flex-col bg-transparent">
-              <Link href="/dashboard/inventory">
-                <Package className="h-6 w-6 mb-2" />
-                Manage Inventory
-              </Link>
-            </Button>
-            <Button asChild variant="outline" className="h-20 flex-col bg-transparent">
-              <Link href="/dashboard/tables">
-                <Users className="h-6 w-6 mb-2" />
-                Table Status
-              </Link>
-            </Button>
+          <div className="space-y-4">
+            {recentOrders.map((order) => (
+              <div key={order.id} className="flex items-center justify-between p-4 border rounded-lg">
+                <div className="flex items-center space-x-4">
+                  <div>
+                    <p className="font-medium">{order.id}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {order.table} • {order.items} items
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-4">
+                  <Badge className={getStatusColor(order.status)}>
+                    {order.status}
+                  </Badge>
+                  <div className="text-right">
+                    <p className="font-medium">{order.amount}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 flex items-center">
+                      <Clock className="h-3 w-3 mr-1" />
+                      {order.time}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
-    </>
-  )
-}
-
-function ChefDashboard({ stats }: { stats: DashboardStats }) {
-  return (
-    <>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Clock className="mr-2 h-5 w-5 text-blue-600" />
-              New Orders
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-blue-600">{stats.activeOrders}</div>
-            <p className="text-sm text-muted-foreground">Ready to prepare</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <ChefHat className="mr-2 h-5 w-5 text-orange-600" />
-              In Progress
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-orange-600">{stats.ongoingOrders}</div>
-            <p className="text-sm text-muted-foreground">Currently cooking</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Receipt className="mr-2 h-5 w-5 text-green-600" />
-              Ready to Serve
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-green-600">{stats.completedOrders}</div>
-            <p className="text-sm text-muted-foreground">Completed today</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Kitchen Actions</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Button asChild className="h-16 flex-col">
-              <Link href="/dashboard/kitchen">
-                <ChefHat className="h-6 w-6 mb-2" />
-                Kitchen Display System
-              </Link>
-            </Button>
-            <Button asChild variant="outline" className="h-16 flex-col bg-transparent">
-              <Link href="/dashboard/orders">
-                <Receipt className="h-6 w-6 mb-2" />
-                View All Orders
-              </Link>
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </>
-  )
-}
-
-function WaiterDashboard({ stats }: { stats: DashboardStats }) {
-  return (
-    <>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Clock className="mr-2 h-5 w-5 text-blue-600" />
-              Active Orders
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-blue-600">{stats.activeOrders}</div>
-            <p className="text-sm text-muted-foreground">Orders in kitchen</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Receipt className="mr-2 h-5 w-5 text-green-600" />
-              Ready to Serve
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-green-600">{stats.completedOrders}</div>
-            <p className="text-sm text-muted-foreground">Ready for pickup</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Waiter Actions</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Button asChild className="h-16 flex-col">
-              <Link href="/dashboard/orders/new">
-                <ShoppingCart className="h-6 w-6 mb-2" />
-                Take Order
-              </Link>
-            </Button>
-            <Button asChild variant="outline" className="h-16 flex-col bg-transparent">
-              <Link href="/dashboard/tables">
-                <Users className="h-6 w-6 mb-2" />
-                Table Status
-              </Link>
-            </Button>
-            <Button asChild variant="outline" className="h-16 flex-col bg-transparent">
-              <Link href="/dashboard/orders">
-                <Receipt className="h-6 w-6 mb-2" />
-                View Orders
-              </Link>
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </>
+    </div>
   )
 }

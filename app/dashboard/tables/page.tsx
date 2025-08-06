@@ -19,19 +19,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { useToast } from "@/hooks/use-toast"
-import { 
-  Plus, 
-  MapPin, 
-  Users, 
-  Clock, 
-  CreditCard, 
-  Receipt, 
-  Building,
-  AlertTriangle,
-  CheckCircle,
-  QrCode,
-  Download
-} from "lucide-react"
+import { Plus, MapPin, Users, Clock, CreditCard, Receipt, Building, AlertTriangle, CheckCircle, QrCode, Download, Settings, Table, Eye } from 'lucide-react'
 import Link from "next/link"
 import QRCodeLib from "qrcode"
 
@@ -356,34 +344,37 @@ export default function TablesPage() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case "available":
-        return "bg-white border-gray-200 hover:bg-gray-50"
-      case "in_kitchen":
-        return "bg-blue-50 border-blue-200 hover:bg-blue-100"
-      case "serving":
-        return "bg-green-50 border-green-200 hover:bg-green-100"
+        return "bg-green-100 text-green-800"
+      case "occupied":
+        return "bg-red-100 text-red-800"
+      case "reserved":
+        return "bg-yellow-100 text-yellow-800"
+      case "maintenance":
+        return "bg-gray-100 text-gray-800"
       default:
-        return "bg-gray-50 border-gray-200"
+        return "bg-gray-100 text-gray-800"
     }
   }
 
-  const getStatusBadge = (status: string) => {
+  const getStatusIcon = (status: string) => {
     switch (status) {
-      case "available":
-        return (
-          <Badge variant="outline" className="bg-white text-gray-700">
-            Available
-          </Badge>
-        )
-      case "in_kitchen":
-        return <Badge className="bg-blue-600 text-white">In Kitchen</Badge>
-      case "serving":
-        return <Badge className="bg-green-600 text-white">Serving</Badge>
-      default:
-        return <Badge variant="outline">Unknown</Badge>
+      case "available": return '🟢'
+      case "occupied": return '🔴'
+      case "reserved": return '🟡'
+      case "maintenance": return '⚙️'
+      default: return '⚪'
     }
   }
 
   const filteredTables = tables.filter((table) => (selectedFloor ? table.floors.id === selectedFloor : true))
+
+  const stats = {
+    total: tables.length,
+    available: tables.filter(t => t.status === 'available').length,
+    occupied: tables.filter(t => t.status === 'occupied').length,
+    reserved: tables.filter(t => t.status === 'reserved').length,
+    maintenance: tables.filter(t => t.status === 'maintenance').length,
+  }
 
   if (!hasPermission(user?.role || "", ["super_admin", "owner", "manager", "waiter", "busser"])) {
     return (
@@ -408,17 +399,73 @@ export default function TablesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Table Management</h1>
-          <p className="text-gray-600 dark:text-gray-400">Monitor table status and manage reservations</p>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+            Tables Overview
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400">
+            Manage and monitor all restaurant tables
+          </p>
         </div>
-        {(user?.role === "super_admin" || user?.role === "owner" || user?.role === "manager") && (
+        <div className="flex space-x-2">
+          {(user?.role === "super_admin" || user?.role === "owner" || user?.role === "manager") && (
+            <Link href="/dashboard/tables/manage">
+              <Button>
+                <Settings className="h-4 w-4 mr-2" />
+                Manage Tables
+              </Button>
+            </Link>
+          )}
           <Button asChild>
             <Link href="/dashboard/tables/manage">
-              <Plus className="mr-2 h-4 w-4" />
-              Manage Tables
+              <Plus className="h-4 w-4 mr-2" />
+              Add Table
             </Link>
           </Button>
-        )}
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Total Tables</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.total}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Available</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">{stats.available}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Occupied</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">{stats.occupied}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Reserved</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-yellow-600">{stats.reserved}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Maintenance</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-gray-600">{stats.maintenance}</div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Floor Tabs */}
@@ -434,121 +481,45 @@ export default function TablesPage() {
 
         {floors.map((floor) => (
           <TabsContent key={floor.id} value={floor.id} className="space-y-6">
-            {/* Floor Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Tables</CardTitle>
-                  <Building className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">
-                    {filteredTables.length}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Available</CardTitle>
-                  <CheckCircle className="h-4 w-4 text-green-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-green-600">
-                    {filteredTables.filter(t => t.status === 'available').length}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Occupied</CardTitle>
-                  <Clock className="h-4 w-4 text-blue-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-blue-600">
-                    {filteredTables.filter(t => t.status !== 'available').length}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Ready to Serve</CardTitle>
-                  <Receipt className="h-4 w-4 text-green-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-green-600">
-                    {filteredTables.filter(t => t.status === 'serving').length}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
             {/* Tables Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {filteredTables.map((table) => (
-                <Card 
-                  key={table.id} 
-                  className={`cursor-pointer transition-all duration-200 ${getStatusColor(table.status)}`}
-                >
+                <Card key={table.id} className="hover:shadow-lg transition-shadow">
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
-                      <CardTitle className="text-lg">Table {table.table_number}</CardTitle>
-                      {getStatusBadge(table.status)}
+                      <CardTitle className="text-lg flex items-center">
+                        <Table className="h-5 w-5 mr-2" />
+                        {table.table_number}
+                      </CardTitle>
+                      <span className="text-2xl">{getStatusIcon(table.status)}</span>
                     </div>
-                    <div className="flex items-center text-sm text-gray-500">
+                    <CardDescription className="flex items-center">
                       <Users className="h-4 w-4 mr-1" />
-                      {table.capacity} seats
-                    </div>
+                      Capacity: {table.capacity} people
+                    </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
+                    <Badge className={getStatusColor(table.status)}>
+                      {table.status.charAt(0).toUpperCase() + table.status.slice(1)}
+                    </Badge>
+                    
                     {table.current_order && (
-                      <div className="space-y-2">
-                        <div className="text-sm">
-                          <div className="font-medium">{table.current_order.customer_name}</div>
-                          <div className="text-gray-500">
-                            {table.current_order.guest_count} guests • {table.current_order.order_items.length} items
-                          </div>
-                        </div>
-                        <div className="text-sm">
-                          <div className="font-medium">₹{table.current_order.total_amount.toFixed(2)}</div>
-                          <div className="text-gray-500">
-                            {new Date(table.current_order.created_at).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
-                          </div>
-                        </div>
-                        {table.current_order.payment_status === 'pending' && (
-                          <Badge className="bg-yellow-100 text-yellow-800">
-                            Payment Pending
-                          </Badge>
-                        )}
+                      <div className="text-sm text-gray-600 dark:text-gray-400">
+                        Current Order: <span className="font-medium">{table.current_order.order_number}</span>
                       </div>
                     )}
-
+                    
                     <div className="flex space-x-2">
-                      {table.status !== 'available' && (
-                        <Button 
-                          size="sm" 
-                          variant="outline"
-                          onClick={() => initiateTableFreeing(table)}
-                          className="flex-1"
-                        >
-                          <CreditCard className="h-4 w-4 mr-1" />
-                          Free Table
+                      {table.status === 'occupied' && table.current_order && (
+                        <Button size="sm" variant="outline" className="flex-1" onClick={() => console.log('View Order')}>
+                          <Eye className="h-4 w-4 mr-1" />
+                          View Order
                         </Button>
                       )}
-                      {table.qr_code_url && (
-                        <Button 
-                          size="sm" 
-                          variant="outline"
-                          onClick={() => window.open(table.qr_code_url!, '_blank')}
-                        >
-                          <QrCode className="h-4 w-4" />
-                        </Button>
-                      )}
+                      <Button size="sm" variant="outline" className="flex-1" onClick={() => window.open(table.qr_code_url!, '_blank')}>
+                        <QrCode className="h-4 w-4 mr-1" />
+                        QR Code
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
@@ -637,7 +608,7 @@ export default function TablesPage() {
                   {upiQRCode && (
                     <div className="text-center">
                       <img
-                        src={upiQRCode}
+                        src={upiQRCode || "/placeholder.svg"}
                         alt="UPI QR Code"
                         className="mx-auto mb-2"
                       />

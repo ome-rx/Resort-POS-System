@@ -1,198 +1,91 @@
-"use client"
+'use client'
 
-import type React from "react"
-import { useState } from "react"
-import { useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Eye, EyeOff, LogIn } from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { useAuth } from '@/lib/auth'
+import { toast } from 'sonner'
 
-export default function LoginForm() {
-  const [username, setUsername] = useState("")
-  const [password, setPassword] = useState("")
-  const [showPassword, setShowPassword] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
+export function LoginForm() {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+  const { signIn } = useAuth()
   const router = useRouter()
-  const { toast } = useToast()
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
-    setError("")
+    setIsLoading(true)
 
     try {
-      // Demo credentials for testing
-      const validCredentials = [
-        {
-          username: "super-admin",
-          password: "super-admin",
-          role: "super_admin",
-          full_name: "Super Administrator",
-          email: "admin@resort.com",
-        },
-        {
-          username: "owner",
-          password: "owner123",
-          role: "owner",
-          full_name: "Resort Owner",
-          email: "owner@resort.com",
-        },
-        {
-          username: "manager",
-          password: "manager123",
-          role: "manager",
-          full_name: "Restaurant Manager",
-          email: "manager@resort.com",
-        },
-        { username: "waiter", password: "waiter123", role: "waiter", full_name: "Waiter", email: "waiter@resort.com" },
-        { username: "chef", password: "chef123", role: "chef", full_name: "Head Chef", email: "chef@resort.com" },
-        {
-          username: "admin",
-          password: "password123",
-          role: "super_admin",
-          full_name: "Administrator",
-          email: "admin@resort.com",
-        },
-        {
-          username: "waiter1",
-          password: "password123",
-          role: "waiter",
-          full_name: "Waiter 1",
-          email: "waiter1@resort.com",
-        },
-      ]
-
-      const validUser = validCredentials.find((cred) => cred.username === username && cred.password === password)
-
-      if (!validUser) {
-        setError("Invalid username or password")
-        setLoading(false)
-        return
+      const success = await signIn(username, password)
+      if (success) {
+        toast.success('Login successful!')
+        router.push('/dashboard')
+      } else {
+        toast.error('Invalid username or password')
       }
-
-      // Create user object
-      const userData = {
-        id: `user_${validUser.username}`,
-        username: validUser.username,
-        role: validUser.role,
-        full_name: validUser.full_name,
-        email: validUser.email,
-        is_active: true,
-      }
-
-      // Store user data in localStorage
-      localStorage.setItem("user", JSON.stringify(userData))
-
-      toast({
-        title: "Login successful",
-        description: `Welcome back, ${userData.full_name}!`,
-      })
-
-      // Redirect to dashboard
-      router.push("/dashboard")
-    } catch (err) {
-      setError("An error occurred during login")
-      console.error("Login error:", err)
+    } catch (error) {
+      toast.error('Login failed. Please try again.')
     } finally {
-      setLoading(false)
+      setIsLoading(false)
     }
   }
 
   return (
-    <Card className="w-full">
-      <CardHeader className="space-y-1">
-        <CardTitle className="text-2xl text-center">Sign In</CardTitle>
-        <CardDescription className="text-center">Enter your credentials to access the POS system</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="username">Username</Label>
-            <Input
-              id="username"
-              type="text"
-              placeholder="Enter your username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <div className="relative">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800">
+      <Card className="w-full max-w-md">
+        <CardHeader className="space-y-1">
+          <CardTitle className="text-2xl font-bold text-center">Resort POS System</CardTitle>
+          <CardDescription className="text-center">
+            Enter your credentials to access the system
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="username">Username</Label>
+              <Input
+                id="username"
+                type="text"
+                placeholder="Enter your username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
               <Input
                 id="password"
-                type={showPassword ? "text" : "password"}
+                type="password"
                 placeholder="Enter your password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
               />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                onClick={() => setShowPassword(!showPassword)}
-              >
-                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </Button>
+            </div>
+            <Button type="submit" className="w-full" disabled={isLoading}>
+              {isLoading ? 'Signing in...' : 'Sign In'}
+            </Button>
+          </form>
+          
+          <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+            <p className="text-sm font-medium mb-2">Demo Credentials:</p>
+            <div className="text-xs space-y-1">
+              <div><strong>Super Admin:</strong> super-admin / super-admin</div>
+              <div><strong>Owner:</strong> owner / owner123</div>
+              <div><strong>Manager:</strong> manager / manager123</div>
+              <div><strong>Waiter:</strong> waiter / waiter123</div>
+              <div><strong>Chef:</strong> chef / chef123</div>
+              <div><strong>Admin:</strong> admin / password123</div>
             </div>
           </div>
-
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? (
-              <div className="flex items-center">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                Signing in...
-              </div>
-            ) : (
-              <div className="flex items-center">
-                <LogIn className="mr-2 h-4 w-4" />
-                Sign In
-              </div>
-            )}
-          </Button>
-        </form>
-
-        <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
-          <p className="text-sm font-medium mb-2">Demo Credentials:</p>
-          <div className="text-xs space-y-1">
-            <p>
-              <strong>Super Admin:</strong> super-admin / super-admin
-            </p>
-            <p>
-              <strong>Owner:</strong> owner / owner123
-            </p>
-            <p>
-              <strong>Manager:</strong> manager / manager123
-            </p>
-            <p>
-              <strong>Waiter:</strong> waiter / waiter123
-            </p>
-            <p>
-              <strong>Chef:</strong> chef / chef123
-            </p>
-            <p>
-              <strong>Admin:</strong> admin / password123
-            </p>
-            <p>
-              <strong>Waiter 1:</strong> waiter1 / password123
-            </p>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </div>
   )
 }
