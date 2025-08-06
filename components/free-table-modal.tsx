@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { CreditCard, Banknote, Smartphone, Building } from 'lucide-react'
 import { supabase } from "@/lib/supabase"
 import { useToast } from "@/hooks/use-toast"
@@ -18,21 +17,16 @@ interface Order {
   customer_name: string
   guest_count: number
   total_amount: number
-  subtotal: number
-  tax_amount: number
   status: string
   created_at: string
   order_items: {
     id: string
-    menu_item_id: string
-    quantity: number
-    unit_price: number
-    total_price: number
-    modifiers?: string
-    menu_items: {
+    menu_item: {
       name: string
       price: number
     }
+    quantity: number
+    custom_note?: string
   }[]
 }
 
@@ -54,7 +48,7 @@ interface FreeTableModalProps {
 type PaymentMethod = "cash" | "card" | "upi" | "credit"
 
 export function FreeTableModal({ isOpen, onClose, table, onSuccess }: FreeTableModalProps) {
-  const [step, setStep] = useState<"loading" | "payment" | "confirmation">("loading")
+  const [step, setStep] = useState<"payment" | "confirmation">("payment")
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash")
   const [upiQrCode, setUpiQrCode] = useState<string>("")
   const [creditDetails, setCreditDetails] = useState({
@@ -62,81 +56,44 @@ export function FreeTableModal({ isOpen, onClose, table, onSuccess }: FreeTableM
     guestName: "",
   })
   const [loading, setLoading] = useState(false)
-  const [order, setOrder] = useState<Order | null>(null)
   const { toast } = useToast()
 
   useEffect(() => {
-    if (isOpen && table?.current_order_id) {
-      fetchOrderDetails()
-    }
-  }, [isOpen, table])
-
-  useEffect(() => {
-    if (paymentMethod === "upi" && order) {
+    if (paymentMethod === "upi" && table?.current_order_id) {
       generateUpiQrCode()
     }
-  }, [paymentMethod, order])
+  }, [paymentMethod, table])
 
-  const fetchOrderDetails = async () => {
+  const generateUpiQrCode = async () => {
     if (!table?.current_order_id) return
 
     try {
-      setStep("loading")
-      const { data: orderData, error } = await supabase
+      const { data: orderData } = await supabase
         .from("orders")
-        .select(`
-          *,
-          order_items (
-            *,
-            menu_items (name, price)
-          )
-        `)
+        .select("total_amount")
         .eq("id", table.current_order_id)
         .single()
 
-      if (error) throw error
+      if (!orderData) throw new Error("Order not found")
 
-      setOrder(orderData)
-      setStep("payment")
-    } catch (error) {
-      console.error("Error fetching order:", error)
-      toast({
-        title: "Error",
-        description: "Failed to load order details",
-        variant: "destructive",
-      })
-      onClose()
-    }
-  }
-
-  const generateUpiQrCode = async () => {
-    if (!order) return
-
-    try {
-      const amount = order.total_amount
-      const upiString = `upi://pay?pa=restaurant@upi&pn=Resort Restaurant&am=${amount}&cu=INR&tn=Table ${table?.table_number} Payment - Order ${order.id.slice(-6)}`
-      
+      const upiString = `upi://pay?pa=restaurant@upi&pn=Resort Restaurant&am=${orderData.total_amount}&cu=INR&tn=Table ${table.table_number} Payment`
       const qrCode = await QRCode.toDataURL(upiString, {
         width: 200,
         margin: 2,
-        color: {
-          dark: '#000000',
-          light: '#FFFFFF'
-        }
       })
       setUpiQrCode(qrCode)
     } catch (error) {
       console.error("Error generating UPI QR code:", error)
-      toast({
-        title: "Error",
-        description: "Failed to generate UPI QR code",
-        variant: "destructive",
-      })
     }
   }
 
+  const handlePaymentMethodSelect = (method: PaymentMethod) => {
+    setPaymentMethod(method)
+    setCreditDetails({ roomNumber: "", guestName: "" })
+  }
+
   const handleProcessPayment = async () => {
-    if (!order || !table) return
+    if (!table?.current_order_id) return
 
     if (paymentMethod === "credit") {
       if (!creditDetails.roomNumber.trim() || !creditDetails.guestName.trim()) {
@@ -154,37 +111,34 @@ export function FreeTableModal({ isOpen, onClose, table, onSuccess }: FreeTableM
     try {
       const paymentData = {
         payment_method: paymentMethod,
-        payment_status: paymentMethod === "credit" ? "credit" : "paid",
-        status: "completed",
+        payment_status: "completed",
         ...(paymentMethod === "credit" && {
-          room_number: creditDetails.roomNumber,
-          guest_name: creditDetails.guestName,
+          credit_room_number: creditDetails.roomNumber,
+          credit_guest_name: creditDetails.guestName,
         }),
       }
 
-      // Update order
       const { error: orderError } = await supabase
         .from("orders")
-        .update(paymentData)
-        .eq("id", order.id)
+        .update({
+          ...paymentData,
+          status: "completed",
+        })
+        .eq("id", table.current_order_id)
 
       if (orderError) throw orderError
 
-      // Update table status
       const { error: tableError } = await supabase
         .from("restaurant_tables")
-        .update({ 
-          status: "available", 
-          current_order_id: null 
-        })
+        .update({ status: "available", current_order_id: null })
         .eq("id", table.id)
 
       if (tableError) throw tableError
 
       setStep("confirmation")
       toast({
-        title: "Payment Processed",
-        description: `Payment of ₹${order.total_amount.toFixed(2)} processed successfully`,
+        title: "Success",
+        description: "Payment processed successfully",
       })
     } catch (error) {
       console.error("Error processing payment:", error)
@@ -200,179 +154,185 @@ export function FreeTableModal({ isOpen, onClose, table, onSuccess }: FreeTableM
 
   const handleConfirmFreeTable = () => {
     onSuccess()
-    handleClose()
+    onClose()
+    setStep("payment")
+    setPaymentMethod("cash")
+    setCreditDetails({ roomNumber: "", guestName: "" })
     toast({
-      title: "Table Freed",
-      description: `Table ${table?.table_number} is now available`,
+      title: "Success",
+      description: `Table ${table?.table_number} has been freed successfully`,
     })
   }
 
   const handleClose = () => {
     onClose()
-    setStep("loading")
+    setStep("payment")
     setPaymentMethod("cash")
     setCreditDetails({ roomNumber: "", guestName: "" })
-    setOrder(null)
-    setUpiQrCode("")
   }
 
-  if (!table) return null
+  if (!table || !table.current_order_id) return null
+
+  const { data: orderData } = supabase.from("orders").select("*").eq("id", table.current_order_id).single()
+
+  const order = orderData as Order
+
+  const subtotal = order.order_items.reduce((sum, item) => sum + item.menu_item.price * item.quantity, 0)
+  const sgst = subtotal * 0.09
+  const cgst = subtotal * 0.09
+  const total = subtotal + sgst + cgst
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>
-            {step === "loading" ? "Loading Order Details..." 
-             : step === "payment" ? "Process Payment & Free Table" 
-             : "Payment Completed"}
-          </DialogTitle>
+          <DialogTitle>{step === "payment" ? "Process Payment & Free Table" : "Confirm Table Release"}</DialogTitle>
           {step === "payment" && (
             <DialogDescription>
-              Complete the payment for Table {table.table_number} to free the table.
+              Are you sure you want to free this table? This will mark any current order as completed.
             </DialogDescription>
           )}
         </DialogHeader>
 
-        {step === "loading" && (
-          <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-          </div>
-        )}
-
-        {step === "payment" && order && (
+        {step === "payment" ? (
           <div className="space-y-6">
-            {/* Order Summary */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Order Summary - Table {table.table_number}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="flex justify-between">
-                    <span>Customer:</span>
-                    <span className="font-medium">{order.customer_name}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Guests:</span>
-                    <span>{order.guest_count}</span>
-                  </div>
-                  <Separator />
-                  <div className="space-y-2">
-                    {order.order_items.map((item, index) => (
-                      <div key={index} className="flex justify-between">
-                        <span>{item.menu_items.name} × {item.quantity}</span>
-                        <span>₹{item.total_price.toFixed(2)}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <Separator />
-                  <div className="space-y-1">
-                    <div className="flex justify-between">
-                      <span>Subtotal:</span>
-                      <span>₹{order.subtotal.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Tax:</span>
-                      <span>₹{order.tax_amount.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between font-bold text-lg">
-                      <span>Total:</span>
-                      <span>₹{order.total_amount.toFixed(2)}</span>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Payment Methods */}
             <div className="space-y-4">
-              <Label>Select Payment Method:</Label>
-              <div className="grid grid-cols-2 gap-4">
-                <Button
-                  variant={paymentMethod === "cash" ? "default" : "outline"}
-                  onClick={() => setPaymentMethod("cash")}
-                  className="h-16"
-                >
-                  <Banknote className="w-6 h-6 mr-2" />
-                  Cash
-                </Button>
-                <Button
-                  variant={paymentMethod === "card" ? "default" : "outline"}
-                  onClick={() => setPaymentMethod("card")}
-                  className="h-16"
-                >
-                  <CreditCard className="w-6 h-6 mr-2" />
-                  Card
-                </Button>
-                <Button
-                  variant={paymentMethod === "upi" ? "default" : "outline"}
-                  onClick={() => setPaymentMethod("upi")}
-                  className="h-16"
-                >
-                  <Smartphone className="w-6 h-6 mr-2" />
-                  UPI
-                </Button>
-                <Button
-                  variant={paymentMethod === "credit" ? "default" : "outline"}
-                  onClick={() => setPaymentMethod("credit")}
-                  className="h-16"
-                >
-                  <Building className="w-6 h-6 mr-2" />
-                  Room Credit
-                </Button>
+              <h3 className="text-lg font-semibold">Order Summary</h3>
+              <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg space-y-2">
+                <div className="flex justify-between">
+                  <span>Customer:</span>
+                  <span className="font-medium">{order.customer_name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Guests:</span>
+                  <span className="font-medium">{order.guest_count}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Time:</span>
+                  <span className="font-medium">{new Date(order.created_at).toLocaleString()}</span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="font-medium">Items Ordered:</h4>
+                {order.order_items.map((item) => (
+                  <div key={item.id} className="flex justify-between items-center py-2 border-b">
+                    <div>
+                      <span className="font-medium">{item.menu_item.name}</span>
+                      <span className="text-gray-600 ml-2">x{item.quantity}</span>
+                      {item.custom_note && <p className="text-sm text-gray-500 italic">Note: {item.custom_note}</p>}
+                    </div>
+                    <span className="font-medium">₹{(item.menu_item.price * item.quantity).toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="space-y-2 pt-4 border-t">
+                <div className="flex justify-between">
+                  <span>Subtotal:</span>
+                  <span>₹{subtotal.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>SGST (9%):</span>
+                  <span>₹{sgst.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>CGST (9%):</span>
+                  <span>₹{cgst.toFixed(2)}</span>
+                </div>
+                <Separator />
+                <div className="flex justify-between text-lg font-bold">
+                  <span>Total:</span>
+                  <span>₹{total.toFixed(2)}</span>
+                </div>
               </div>
             </div>
 
-            {/* UPI QR Code */}
-            {paymentMethod === "upi" && upiQrCode && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Scan to Pay</CardTitle>
-                </CardHeader>
-                <CardContent className="text-center">
-                  <img src={upiQrCode} alt="UPI QR Code" className="mx-auto mb-4" />
-                  <p className="text-sm text-gray-600">
-                    Amount: ₹{order.total_amount.toFixed(2)}
-                  </p>
-                </CardContent>
-              </Card>
-            )}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold">Select Payment Method</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <Button
+                  variant={paymentMethod === "cash" ? "default" : "outline"}
+                  onClick={() => handlePaymentMethodSelect("cash")}
+                  className="h-20 flex-col space-y-2"
+                >
+                  <Banknote className="h-6 w-6" />
+                  <span>Cash</span>
+                </Button>
 
-            {/* Credit Details */}
-            {paymentMethod === "credit" && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Room Credit Details</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <Label htmlFor="roomNumber">Room Number</Label>
-                    <Input
-                      id="roomNumber"
-                      value={creditDetails.roomNumber}
-                      onChange={(e) => setCreditDetails(prev => ({
-                        ...prev,
-                        roomNumber: e.target.value
-                      }))}
-                      placeholder="Enter room number"
-                    />
+                <Button
+                  variant={paymentMethod === "card" ? "default" : "outline"}
+                  onClick={() => handlePaymentMethodSelect("card")}
+                  className="h-20 flex-col space-y-2"
+                >
+                  <CreditCard className="h-6 w-6" />
+                  <span>Card</span>
+                </Button>
+
+                <Button
+                  variant={paymentMethod === "upi" ? "default" : "outline"}
+                  onClick={() => handlePaymentMethodSelect("upi")}
+                  className="h-20 flex-col space-y-2"
+                >
+                  <Smartphone className="h-6 w-6" />
+                  <span>UPI</span>
+                </Button>
+
+                <Button
+                  variant={paymentMethod === "credit" ? "default" : "outline"}
+                  onClick={() => handlePaymentMethodSelect("credit")}
+                  className="h-20 flex-col space-y-2"
+                >
+                  <Building className="h-6 w-6" />
+                  <span>Credit</span>
+                </Button>
+              </div>
+
+              {paymentMethod === "upi" && upiQrCode && (
+                <div className="flex flex-col items-center space-y-2 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                  <p className="text-sm font-medium">Scan QR Code to Pay ₹{total.toFixed(2)}</p>
+                  <img src={upiQrCode || "/placeholder.svg"} alt="UPI QR Code" className="w-48 h-48" />
+                </div>
+              )}
+
+              {paymentMethod === "credit" && (
+                <div className="space-y-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                  <h4 className="font-medium">Credit Payment Details</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="roomNumber">Room Number</Label>
+                      <Input
+                        id="roomNumber"
+                        value={creditDetails.roomNumber}
+                        onChange={(e) =>
+                          setCreditDetails({
+                            ...creditDetails,
+                            roomNumber: e.target.value,
+                          })
+                        }
+                        placeholder="e.g., 101"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="guestName">Guest Name</Label>
+                      <Input
+                        id="guestName"
+                        value={creditDetails.guestName}
+                        onChange={(e) =>
+                          setCreditDetails({
+                            ...creditDetails,
+                            guestName: e.target.value,
+                          })
+                        }
+                        placeholder="Guest full name"
+                        required
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <Label htmlFor="guestName">Guest Name</Label>
-                    <Input
-                      id="guestName"
-                      value={creditDetails.guestName}
-                      onChange={(e) => setCreditDetails(prev => ({
-                        ...prev,
-                        guestName: e.target.value
-                      }))}
-                      placeholder="Enter guest name"
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+                </div>
+              )}
+            </div>
 
             <div className="flex justify-end space-x-2">
               <Button variant="outline" onClick={handleClose}>
@@ -383,9 +343,7 @@ export function FreeTableModal({ isOpen, onClose, table, onSuccess }: FreeTableM
               </Button>
             </div>
           </div>
-        )}
-
-        {step === "confirmation" && order && (
+        ) : (
           <div className="space-y-6 text-center">
             <div className="space-y-2">
               <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto">
@@ -395,7 +353,7 @@ export function FreeTableModal({ isOpen, onClose, table, onSuccess }: FreeTableM
               </div>
               <h3 className="text-lg font-semibold">Payment Completed Successfully</h3>
               <p className="text-gray-600">
-                Payment of ₹{order.total_amount.toFixed(2)} has been processed via {paymentMethod.toUpperCase()}
+                Payment of ₹{total.toFixed(2)} has been processed via {paymentMethod.toUpperCase()}
               </p>
               {paymentMethod === "credit" && (
                 <div className="bg-blue-50 dark:bg-blue-900 p-3 rounded-lg">
@@ -407,13 +365,17 @@ export function FreeTableModal({ isOpen, onClose, table, onSuccess }: FreeTableM
               )}
             </div>
 
+            <div className="space-y-2">
+              <p className="text-sm text-gray-600">
+                Are you sure you want to free this table? This action cannot be undone.
+              </p>
+            </div>
+
             <div className="flex justify-center space-x-2">
               <Button variant="outline" onClick={handleClose}>
                 Keep Table Occupied
               </Button>
-              <Button onClick={handleConfirmFreeTable}>
-                Confirm & Free Table
-              </Button>
+              <Button onClick={handleConfirmFreeTable}>Confirm & Free Table</Button>
             </div>
           </div>
         )}
